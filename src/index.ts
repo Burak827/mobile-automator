@@ -156,7 +156,7 @@ program
   .option("--version-id <id>", "App Store version id")
   .option("--version-string <version>", "App Store version string")
   .option("--platform <platform>", "Platform filter (IOS, MAC_OS, TV_OS, VISION_OS)")
-  .option("--source-locale <locale>", "Source locale", "en-US")
+  .option("--source-locale <locale>", "Source locale")
   .option("--target-locales <locales>", "Comma-separated list of target locales")
   .option("--source-text-file <path>", "Use a local file for the source text")
   .option("--dry-run", "Translate but do not update App Store Connect", false)
@@ -199,7 +199,8 @@ program
       });
 
       const localizations = localizationsResponse.data;
-      const sourceLocale = opts.sourceLocale;
+      const sourceLocale =
+        opts.sourceLocale ?? env.ascSourceLocale ?? "en-US";
 
       let sourceText: string | undefined;
       if (opts.sourceTextFile) {
@@ -217,7 +218,9 @@ program
         );
       }
 
-      const targetLocalesInput = parseCommaList(opts.targetLocales);
+      const targetLocalesInput = parseCommaList(
+        opts.targetLocales ?? env.ascTargetLocales
+      );
       const targetLocales = uniqueList(
         targetLocalesInput.length > 0
           ? targetLocalesInput

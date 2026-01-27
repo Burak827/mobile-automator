@@ -28,6 +28,8 @@ Optional env vars:
 - ASC_APP_ID
 - ASC_VERSION_ID
 - ASC_PLATFORM (default: IOS)
+- ASC_SOURCE_LOCALE (default: en-US)
+- ASC_TARGET_LOCALES (comma-separated)
 - OPENAI_BASE_URL (default: https://api.openai.com/v1)
 
 ## Commands

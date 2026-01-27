@@ -9,6 +9,8 @@ export type EnvConfig = {
   ascAppId?: string;
   ascVersionId?: string;
   ascPlatform?: string;
+  ascSourceLocale?: string;
+  ascTargetLocales?: string;
   ascBaseUrl?: string;
   openaiApiKey?: string;
   openaiModel?: string;
@@ -23,6 +25,8 @@ export function loadEnvConfig(): EnvConfig {
     ascAppId: process.env.ASC_APP_ID,
     ascVersionId: process.env.ASC_VERSION_ID,
     ascPlatform: process.env.ASC_PLATFORM,
+    ascSourceLocale: process.env.ASC_SOURCE_LOCALE,
+    ascTargetLocales: process.env.ASC_TARGET_LOCALES,
     ascBaseUrl: process.env.ASC_BASE_URL,
     openaiApiKey: process.env.OPENAI_API_KEY,
     openaiModel: process.env.OPENAI_MODEL,
