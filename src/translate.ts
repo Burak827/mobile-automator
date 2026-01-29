@@ -4,37 +4,23 @@ export type OpenAIConfig = {
   baseUrl?: string;
 };
 
-export async function translateWithOpenAI(options: {
+type OpenAIMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+async function requestOpenAI(options: {
   config: OpenAIConfig;
-  sourceLocale: string;
-  targetLocale: string;
-  text: string;
-  fieldName?: string;
-  maxLength?: number;
+  messages: OpenAIMessage[];
+  temperature?: number;
 }): Promise<string> {
-  const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
+  const { config, messages } = options;
   const baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
-  const lengthHint =
-    typeof maxLength === "number" && Number.isFinite(maxLength)
-      ? ` Keep it within ${Math.floor(maxLength)} characters.`
-      : "";
 
   const payload = {
     model: config.model,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a translation engine for App Store listing text. " +
-          "Translate accurately, keep line breaks and formatting, and return only the translated text.",
-      },
-      {
-        role: "user",
-        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}.${lengthHint}\n\n${text}`,
-      },
-    ],
-    temperature: 0.2,
+    messages,
+    temperature: options.temperature ?? 0.2,
   };
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -80,4 +66,68 @@ export async function translateWithOpenAI(options: {
   }
 
   return content.trim();
+}
+
+export async function translateWithOpenAI(options: {
+  config: OpenAIConfig;
+  sourceLocale: string;
+  targetLocale: string;
+  text: string;
+  fieldName?: string;
+  maxLength?: number;
+}): Promise<string> {
+  const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
+  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
+  const lengthHint =
+    typeof maxLength === "number" && Number.isFinite(maxLength)
+      ? ` The translation must be ${Math.floor(maxLength)} characters or fewer.`
+      : "";
+
+  return requestOpenAI({
+    config,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a translation engine for App Store listing text. " +
+          "Translate accurately, keep line breaks and formatting, and return only the translated text.",
+      },
+      {
+        role: "user",
+        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}.${lengthHint} Return only the translated text.\n\n${text}`,
+      },
+    ],
+  });
+}
+
+export async function shortenWithOpenAI(options: {
+  config: OpenAIConfig;
+  targetLocale: string;
+  text: string;
+  fieldName?: string;
+  maxLength: number;
+}): Promise<string> {
+  const { config, targetLocale, text, fieldName, maxLength } = options;
+  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
+  const limit = Math.floor(maxLength);
+
+  return requestOpenAI({
+    config,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a rewriting engine for App Store listing text. " +
+          "Shorten while preserving meaning, tone, and formatting. Do not add new info. Return only the shortened text.",
+      },
+      {
+        role: "user",
+        content:
+          `Shorten${fieldHint} in ${targetLocale} to ${limit} characters or fewer. ` +
+          "Keep line breaks and formatting. Return only the shortened text.\n\n" +
+          text,
+      },
+    ],
+    temperature: 0.2,
+  });
 }

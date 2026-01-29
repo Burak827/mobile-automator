@@ -13,7 +13,7 @@ import {
   AppStoreVersionLocalizationAttributes,
   AscListResponse,
 } from "./ascTypes.js";
-import { translateWithOpenAI } from "./translate.js";
+import { shortenWithOpenAI, translateWithOpenAI } from "./translate.js";
 
 type LocalizationField = "description" | "promotionalText" | "whatsNew";
 
@@ -491,6 +491,12 @@ program
       console.log(`Target locales: ${targetLocales.join(", ")}`);
       console.log(`Fields: ${fieldsToSync.join(", ")}`);
 
+      const skippedFields: Record<LocalizationField, Set<string>> = {
+        description: new Set(),
+        promotionalText: new Set(),
+        whatsNew: new Set(),
+      };
+
       const missingSourceFields = fieldsToSync.filter(
         (field) => sourceTexts[field] === undefined
       );
@@ -531,6 +537,39 @@ program
               const waitMs = err.retryAfterMs ?? backoff;
               console.log(
                 `[retry] ${params.targetLocale} ${params.fieldName} in ${waitMs}ms`
+              );
+              attempt += 1;
+              await sleep(waitMs);
+              continue;
+            }
+            throw error;
+          }
+        }
+      };
+
+      const shortenWithRetry = async (params: {
+        targetLocale: string;
+        text: string;
+        fieldName: string;
+        maxLength: number;
+      }) => {
+        let attempt = 0;
+        while (true) {
+          try {
+            return await shortenWithOpenAI({
+              config: openaiConfig,
+              targetLocale: params.targetLocale,
+              text: params.text,
+              fieldName: params.fieldName,
+              maxLength: params.maxLength,
+            });
+          } catch (error) {
+            const err = error as Error & { status?: number; retryAfterMs?: number };
+            if (err.status === 429 && attempt < maxRetries) {
+              const backoff = retryBaseMs * Math.pow(2, attempt);
+              const waitMs = err.retryAfterMs ?? backoff;
+              console.log(
+                `[retry] ${params.targetLocale} ${params.fieldName} shorten in ${waitMs}ms`
               );
               attempt += 1;
               await sleep(waitMs);
@@ -589,25 +628,43 @@ program
           await sleep(delayMs);
 
           const limit = limits[field];
+          let finalText = translated;
           if (limit !== undefined && translated.length > limit) {
-            const message = `${FIELD_LABELS[field]} for ${locale} exceeds limit (${translated.length}/${limit})`;
+            console.log(
+              `[limit] ${FIELD_LABELS[field]} for ${locale} exceeds limit (${translated.length}/${limit}) -> shortening`
+            );
+            finalText = await shortenWithRetry({
+              targetLocale: locale,
+              text: translated,
+              fieldName: FIELD_LABELS[field],
+              maxLength: limit,
+            });
+            console.log(
+              `Shortened ${locale} ${field} length=${finalText.length}`
+            );
+            await sleep(delayMs);
+          }
+
+          if (limit !== undefined && finalText.length > limit) {
+            const message = `${FIELD_LABELS[field]} for ${locale} still exceeds limit (${finalText.length}/${limit})`;
             if (strictLimits) {
               throw new Error(message);
             }
             console.log(`[limit] ${message} -> skipping field`);
+            skippedFields[field].add(locale);
             continue;
           }
 
-          updates[field] = translated;
+          updates[field] = finalText;
 
           if (opts.dryRun) {
             console.log(
-              `[dry-run] ${locale} ${field} length=${translated.length}`
+              `[dry-run] ${locale} ${field} length=${finalText.length}`
             );
           }
           if (opts.preview) {
             console.log(`[preview] ${locale} ${field}`);
-            console.log(translated);
+            console.log(finalText);
           }
         }
 
@@ -654,6 +711,20 @@ program
           console.log(`Created ${locale}`);
         } else {
           console.log(`Skipping ${locale} (missing localization)`);
+        }
+      }
+
+      const skippedSummary = fieldsToSync
+        .map((field) => ({
+          field,
+          locales: targetLocales.filter((locale) => skippedFields[field].has(locale)),
+        }))
+        .filter((entry) => entry.locales.length > 0);
+
+      if (skippedSummary.length > 0) {
+        console.log("Skipped fields:");
+        for (const entry of skippedSummary) {
+          console.log(`${entry.field}: ${entry.locales.join(", ")}`);
         }
       }
     } catch (error) {
