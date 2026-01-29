@@ -10,10 +10,15 @@ export async function translateWithOpenAI(options: {
   targetLocale: string;
   text: string;
   fieldName?: string;
+  maxLength?: number;
 }): Promise<string> {
-  const { config, sourceLocale, targetLocale, text, fieldName } = options;
+  const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
   const baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
   const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
+  const lengthHint =
+    typeof maxLength === "number" && Number.isFinite(maxLength)
+      ? ` Keep it within ${Math.floor(maxLength)} characters.`
+      : "";
 
   const payload = {
     model: config.model,
@@ -26,7 +31,7 @@ export async function translateWithOpenAI(options: {
       },
       {
         role: "user",
-        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}:\n\n${text}`,
+        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}.${lengthHint}\n\n${text}`,
       },
     ],
     temperature: 0.2,
@@ -53,7 +58,19 @@ export async function translateWithOpenAI(options: {
         message = `${message}: ${raw}`;
       }
     }
-    throw new Error(message);
+    const error = new Error(message) as Error & {
+      status?: number;
+      retryAfterMs?: number;
+    };
+    error.status = response.status;
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter) {
+      const retryAfterSeconds = Number(retryAfter);
+      if (Number.isFinite(retryAfterSeconds)) {
+        error.retryAfterMs = retryAfterSeconds * 1000;
+      }
+    }
+    throw error;
   }
 
   const data = raw ? JSON.parse(raw) : null;

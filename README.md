@@ -55,7 +55,7 @@ npm run dev -- list-localizations --version-id <VERSION_ID>
 Sync fields from English to specific locales:
 
 ```
-npm run dev -- sync-description \
+npm run dev -- sync \
   --version-id <VERSION_ID> \
   --source-locale en-US \
   --target-locales tr-TR,fr-FR
@@ -64,13 +64,13 @@ npm run dev -- sync-description \
 Sync fields for all existing locales (except source):
 
 ```
-npm run dev -- sync-description --version-id <VERSION_ID>
+npm run dev -- sync --version-id <VERSION_ID>
 ```
 
 Resolve version by version string:
 
 ```
-npm run dev -- sync-description \
+npm run dev -- sync \
   --app-id <APP_ID> \
   --version-string 1.2.3 \
   --target-locales tr-TR
@@ -79,19 +79,31 @@ npm run dev -- sync-description \
 Dry run (no updates):
 
 ```
-npm run dev -- sync-description --version-id <VERSION_ID> --dry-run
+npm run dev -- sync --version-id <VERSION_ID> --dry-run
 ```
 
 Use latest version automatically (highest createdDate/versionString):
 
 ```
-npm run dev -- sync-description --app-id <APP_ID> --target-locales tr-TR
+npm run dev -- sync --app-id <APP_ID> --target-locales tr-TR
+```
+
+Prompt before each locale + throttle requests:
+
+```
+npm run dev -- sync \
+  --app-id <APP_ID> \
+  --fields promotionalText,whatsNew \
+  --confirm-each-locale \
+  --delay-ms 1200 \
+  --max-retries 5 \
+  --retry-base-ms 1000
 ```
 
 Sync only specific fields:
 
 ```
-npm run dev -- sync-description \
+npm run dev -- sync \
   --version-id <VERSION_ID> \
   --fields description,promotionalText
 ```
@@ -99,13 +111,13 @@ npm run dev -- sync-description \
 Preview translated text:
 
 ```
-npm run dev -- sync-description --version-id <VERSION_ID> --preview
+npm run dev -- sync --version-id <VERSION_ID> --preview
 ```
 
 Override length limits (set 0 to disable):
 
 ```
-npm run dev -- sync-description \
+npm run dev -- sync \
   --version-id <VERSION_ID> \
   --limit-promotional-text 170 \
   --limit-description 4000

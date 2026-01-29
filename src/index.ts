@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { readFile } from "fs/promises";
+import { createInterface } from "node:readline/promises";
 import { AscClient } from "./ascClient.js";
 import {
   loadEnvConfig,
@@ -51,6 +52,20 @@ function parseBoolean(value?: string): boolean | undefined {
   if (["1", "true", "yes", "y"].includes(normalized)) return true;
   if (["0", "false", "no", "n"].includes(normalized)) return false;
   return undefined;
+}
+
+function resolveNonNegativeInt(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid number value: ${value}`);
+  }
+  return Math.floor(parsed);
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const DEFAULT_FIELDS: LocalizationField[] = [
@@ -297,7 +312,7 @@ program
   });
 
 program
-  .command("sync-description")
+  .command("sync")
   .description("Translate and sync localization fields from a source locale")
   .option("--app-id <id>", "App Store Connect app id")
   .option("--version-id <id>", "App Store version id")
@@ -321,6 +336,10 @@ program
   )
   .option("--dry-run", "Translate but do not update App Store Connect", false)
   .option("--preview", "Print translated text per locale/field", false)
+  .option("--confirm-each-locale", "Ask for confirmation before each locale")
+  .option("--delay-ms <number>", "Delay between OpenAI requests (ms)")
+  .option("--max-retries <number>", "Max retries for OpenAI 429 errors")
+  .option("--retry-base-ms <number>", "Base backoff delay for retries (ms)")
   .option("--limit-description <number>", "Max length for description")
   .option("--limit-promotional-text <number>", "Max length for promotional text")
   .option("--limit-whats-new <number>", "Max length for What's New")
@@ -330,6 +349,10 @@ program
   .option("--openai-model <model>", "OpenAI model")
   .option("--openai-base-url <url>", "OpenAI base URL")
   .action(async (opts) => {
+    const prompt =
+      opts.confirmEachLocale === true
+        ? createInterface({ input: process.stdin, output: process.stdout })
+        : null;
     try {
       const env = loadEnvConfig();
       const client = resolveAscClient();
@@ -445,6 +468,10 @@ program
         ),
       };
 
+      const delayMs = resolveNonNegativeInt(opts.delayMs, 1200);
+      const maxRetries = resolveNonNegativeInt(opts.maxRetries, 5);
+      const retryBaseMs = resolveNonNegativeInt(opts.retryBaseMs, 1000);
+
       const openaiApiKey = opts.openaiApiKey ?? env.openaiApiKey;
       const openaiModel = opts.openaiModel ?? env.openaiModel;
       const openaiBaseUrl = opts.openaiBaseUrl ?? env.openaiBaseUrl;
@@ -475,8 +502,57 @@ program
         );
       }
 
+      if (prompt && !process.stdin.isTTY) {
+        throw new Error("--confirm-each-locale requires an interactive terminal.");
+      }
+
+      const translateWithRetry = async (params: {
+        sourceLocale: string;
+        targetLocale: string;
+        text: string;
+        fieldName: string;
+        maxLength?: number;
+      }) => {
+        let attempt = 0;
+        while (true) {
+          try {
+            return await translateWithOpenAI({
+              config: openaiConfig,
+              sourceLocale: params.sourceLocale,
+              targetLocale: params.targetLocale,
+              text: params.text,
+              fieldName: params.fieldName,
+              maxLength: params.maxLength,
+            });
+          } catch (error) {
+            const err = error as Error & { status?: number; retryAfterMs?: number };
+            if (err.status === 429 && attempt < maxRetries) {
+              const backoff = retryBaseMs * Math.pow(2, attempt);
+              const waitMs = err.retryAfterMs ?? backoff;
+              console.log(
+                `[retry] ${params.targetLocale} ${params.fieldName} in ${waitMs}ms`
+              );
+              attempt += 1;
+              await sleep(waitMs);
+              continue;
+            }
+            throw error;
+          }
+        }
+      };
+
       for (const locale of targetLocales) {
         if (locale === sourceLocale) continue;
+
+        if (prompt) {
+          const answer = await prompt.question(
+            `Process locale ${locale}? (y/n) `
+          );
+          if (!/^y(es)?$/i.test(answer.trim())) {
+            console.log(`Skipping ${locale} (user declined)`);
+            continue;
+          }
+        }
 
         console.log(`Translating -> ${locale}`);
         const existing = localizations.find(
@@ -502,13 +578,15 @@ program
             continue;
           }
 
-          const translated = await translateWithOpenAI({
-            config: openaiConfig,
+          const translated = await translateWithRetry({
             sourceLocale,
             targetLocale: locale,
             text: sourceText,
             fieldName: FIELD_LABELS[field],
+            maxLength: limits[field],
           });
+          console.log(`Translated ${locale} ${field}`);
+          await sleep(delayMs);
 
           const limit = limits[field];
           if (limit !== undefined && translated.length > limit) {
@@ -581,6 +659,10 @@ program
     } catch (error) {
       console.error(formatError(error));
       process.exitCode = 1;
+    } finally {
+      if (prompt) {
+        await prompt.close();
+      }
     }
   });
 
