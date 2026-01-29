@@ -9,9 +9,11 @@ export async function translateWithOpenAI(options: {
   sourceLocale: string;
   targetLocale: string;
   text: string;
+  fieldName?: string;
 }): Promise<string> {
-  const { config, sourceLocale, targetLocale, text } = options;
+  const { config, sourceLocale, targetLocale, text, fieldName } = options;
   const baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
+  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
 
   const payload = {
     model: config.model,
@@ -19,12 +21,12 @@ export async function translateWithOpenAI(options: {
       {
         role: "system",
         content:
-          "You are a translation engine for App Store listing descriptions. " +
+          "You are a translation engine for App Store listing text. " +
           "Translate accurately, keep line breaks and formatting, and return only the translated text.",
       },
       {
         role: "user",
-        content: `Translate from ${sourceLocale} to ${targetLocale}:\n\n${text}`,
+        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}:\n\n${text}`,
       },
     ],
     temperature: 0.2,

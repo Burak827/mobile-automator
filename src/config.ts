@@ -12,6 +12,11 @@ export type EnvConfig = {
   ascSourceLocale?: string;
   ascTargetLocales?: string;
   ascBaseUrl?: string;
+  ascSyncFields?: string;
+  ascLimitDescription?: string;
+  ascLimitPromotionalText?: string;
+  ascLimitWhatsNew?: string;
+  ascStrictLimits?: string;
   openaiApiKey?: string;
   openaiModel?: string;
   openaiBaseUrl?: string;
@@ -28,6 +33,11 @@ export function loadEnvConfig(): EnvConfig {
     ascSourceLocale: process.env.ASC_SOURCE_LOCALE,
     ascTargetLocales: process.env.ASC_TARGET_LOCALES,
     ascBaseUrl: process.env.ASC_BASE_URL,
+    ascSyncFields: process.env.ASC_SYNC_FIELDS,
+    ascLimitDescription: process.env.ASC_LIMIT_DESCRIPTION,
+    ascLimitPromotionalText: process.env.ASC_LIMIT_PROMOTIONAL_TEXT,
+    ascLimitWhatsNew: process.env.ASC_LIMIT_WHATS_NEW,
+    ascStrictLimits: process.env.ASC_STRICT_LIMITS,
     openaiApiKey: process.env.OPENAI_API_KEY,
     openaiModel: process.env.OPENAI_MODEL,
     openaiBaseUrl: process.env.OPENAI_BASE_URL,

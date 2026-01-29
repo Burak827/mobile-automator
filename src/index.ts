@@ -14,6 +14,8 @@ import {
 } from "./ascTypes.js";
 import { translateWithOpenAI } from "./translate.js";
 
+type LocalizationField = "description" | "promotionalText" | "whatsNew";
+
 const program = new Command();
 program
   .name("asc-auto")
@@ -25,15 +27,87 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-function uniqueList(values: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
+function uniqueList<T extends string>(values: T[]): T[] {
+  const seen = new Set<T>();
+  const result: T[] = [];
   for (const value of values) {
     if (seen.has(value)) continue;
     seen.add(value);
     result.push(value);
   }
   return result;
+}
+
+function resolveLimit(value: string | undefined, fallback: number): number | undefined {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
+}
+
+function parseBoolean(value?: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "y"].includes(normalized)) return true;
+  if (["0", "false", "no", "n"].includes(normalized)) return false;
+  return undefined;
+}
+
+const DEFAULT_FIELDS: LocalizationField[] = [
+  "description",
+  "promotionalText",
+  "whatsNew",
+];
+
+const FIELD_LABELS: Record<LocalizationField, string> = {
+  description: "description",
+  promotionalText: "promotional text",
+  whatsNew: "what's new",
+};
+
+const DEFAULT_LIMITS: Record<LocalizationField, number> = {
+  description: 4000,
+  promotionalText: 170,
+  whatsNew: 4000,
+};
+
+function parseFields(value?: string): LocalizationField[] {
+  const items = parseCommaList(value);
+  if (items.length === 0) return DEFAULT_FIELDS.slice();
+  const fields = items.map((item) => item as LocalizationField);
+  const invalid = fields.filter(
+    (field) =>
+      field !== "description" &&
+      field !== "promotionalText" &&
+      field !== "whatsNew"
+  );
+  if (invalid.length > 0) {
+    throw new Error(
+      `Unsupported field(s): ${invalid.join(", ")}. Use description, promotionalText, whatsNew.`
+    );
+  }
+  return uniqueList(fields);
+}
+
+function parseVersionParts(versionString?: string): number[] | null {
+  if (!versionString) return null;
+  const parts = versionString.split(".");
+  if (parts.some((part) => !/^\d+$/.test(part))) return null;
+  return parts.map((part) => Number(part));
+}
+
+function compareVersionStrings(a?: string, b?: string): number | null {
+  const aParts = parseVersionParts(a);
+  const bParts = parseVersionParts(b);
+  if (!aParts || !bParts) return null;
+  const maxLen = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < maxLen; i += 1) {
+    const aVal = aParts[i] ?? 0;
+    const bVal = bParts[i] ?? 0;
+    if (aVal === bVal) continue;
+    return aVal > bVal ? 1 : -1;
+  }
+  return 0;
 }
 
 function resolveAscClient() {
@@ -82,6 +156,65 @@ async function resolveVersionId(options: {
   return response.data[0].id;
 }
 
+async function resolveLatestVersion(options: {
+  client: AscClient;
+  appId: string;
+  platform?: string;
+}): Promise<{ id: string; attributes?: AppStoreVersionAttributes }> {
+  const response = await options.client.get<
+    AscListResponse<AppStoreVersionAttributes>
+  >(`/v1/apps/${options.appId}/appStoreVersions`, {
+    "filter[platform]": options.platform ? [options.platform] : undefined,
+    "fields[appStoreVersions]": [
+      "versionString",
+      "appVersionState",
+      "platform",
+      "createdDate",
+    ],
+    limit: 200,
+  });
+
+  if (response.data.length === 0) {
+    throw new Error("No App Store versions found to resolve latest version.");
+  }
+
+  const candidates = response.data.map((item) => ({
+    id: item.id,
+    attributes: item.attributes ?? {},
+  }));
+
+  const withCreated = candidates.filter(
+    (item) =>
+      item.attributes?.createdDate &&
+      !Number.isNaN(Date.parse(item.attributes.createdDate))
+  );
+
+  if (withCreated.length > 0) {
+    let latest = withCreated[0];
+    for (const candidate of withCreated.slice(1)) {
+      const latestDate = Date.parse(latest.attributes?.createdDate ?? "");
+      const candidateDate = Date.parse(candidate.attributes?.createdDate ?? "");
+      if (candidateDate > latestDate) {
+        latest = candidate;
+      }
+    }
+    return latest;
+  }
+
+  let latest = candidates[0];
+  for (const candidate of candidates.slice(1)) {
+    const comparison = compareVersionStrings(
+      candidate.attributes?.versionString,
+      latest.attributes?.versionString
+    );
+    if (comparison !== null && comparison > 0) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
+}
+
 program
   .command("list-versions")
   .description("List App Store versions for an app")
@@ -99,17 +232,22 @@ program
         AscListResponse<AppStoreVersionAttributes>
       >(`/v1/apps/${appId}/appStoreVersions`, {
         "filter[platform]": platform ? [platform] : undefined,
-        "fields[appStoreVersions]": ["versionString", "appVersionState", "platform"],
+        "fields[appStoreVersions]": [
+          "versionString",
+          "appVersionState",
+          "platform",
+          "createdDate",
+        ],
         limit: 200,
       });
 
-      console.log("id\tversion\tstate\tplatform");
+      console.log("id\tversion\tstate\tplatform\tcreatedDate");
       for (const item of response.data) {
         const attrs = item.attributes ?? {};
         console.log(
           `${item.id}\t${attrs.versionString ?? ""}\t${
             attrs.appVersionState ?? ""
-          }\t${attrs.platform ?? ""}`
+          }\t${attrs.platform ?? ""}\t${attrs.createdDate ?? ""}`
         );
       }
     } catch (error) {
@@ -133,15 +271,24 @@ program
       const response = await client.get<
         AscListResponse<AppStoreVersionLocalizationAttributes>
       >(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`, {
-        "fields[appStoreVersionLocalizations]": ["locale", "description"],
+        "fields[appStoreVersionLocalizations]": [
+          "locale",
+          "description",
+          "promotionalText",
+          "whatsNew",
+        ],
         limit: 200,
       });
 
-      console.log("id\tlocale\tdescriptionLength");
+      console.log("id\tlocale\tdescriptionLength\tpromoLength\twhatsNewLength");
       for (const item of response.data) {
         const attrs = item.attributes ?? {};
         const length = attrs.description?.length ?? 0;
-        console.log(`${item.id}\t${attrs.locale ?? ""}\t${length}`);
+        const promoLength = attrs.promotionalText?.length ?? 0;
+        const whatsNewLength = attrs.whatsNew?.length ?? 0;
+        console.log(
+          `${item.id}\t${attrs.locale ?? ""}\t${length}\t${promoLength}\t${whatsNewLength}`
+        );
       }
     } catch (error) {
       console.error(formatError(error));
@@ -151,15 +298,33 @@ program
 
 program
   .command("sync-description")
-  .description("Translate and sync description from a source locale")
+  .description("Translate and sync localization fields from a source locale")
   .option("--app-id <id>", "App Store Connect app id")
   .option("--version-id <id>", "App Store version id")
   .option("--version-string <version>", "App Store version string")
   .option("--platform <platform>", "Platform filter (IOS, MAC_OS, TV_OS, VISION_OS)")
   .option("--source-locale <locale>", "Source locale")
   .option("--target-locales <locales>", "Comma-separated list of target locales")
-  .option("--source-text-file <path>", "Use a local file for the source text")
+  .option(
+    "--fields <fields>",
+    "Comma-separated fields to sync (description,promotionalText,whatsNew)"
+  )
+  .option("--source-text-file <path>", "Use a local file for the source description")
+  .option("--source-description-file <path>", "Use a local file for the source description")
+  .option(
+    "--source-promotional-text-file <path>",
+    "Use a local file for the source promotional text"
+  )
+  .option(
+    "--source-whats-new-file <path>",
+    "Use a local file for the source What's New text"
+  )
   .option("--dry-run", "Translate but do not update App Store Connect", false)
+  .option("--preview", "Print translated text per locale/field", false)
+  .option("--limit-description <number>", "Max length for description")
+  .option("--limit-promotional-text <number>", "Max length for promotional text")
+  .option("--limit-whats-new <number>", "Max length for What's New")
+  .option("--strict-limits", "Fail if a translation exceeds limits")
   .option("--no-create-missing", "Do not create missing localizations")
   .option("--openai-api-key <key>", "OpenAI API key")
   .option("--openai-model <model>", "OpenAI model")
@@ -173,28 +338,39 @@ program
 
       let versionId = opts.versionId ?? env.ascVersionId;
       const versionString = opts.versionString;
+      let resolvedVersion: { id: string; attributes?: AppStoreVersionAttributes } | null =
+        null;
 
       if (!versionId) {
         if (!appId) {
           throw new Error("Missing app id. Use --app-id or ASC_APP_ID");
         }
         if (!versionString) {
-          throw new Error(
-            "Missing version id. Use --version-id or provide --version-string."
-          );
+          resolvedVersion = await resolveLatestVersion({
+            client,
+            appId,
+            platform,
+          });
+          versionId = resolvedVersion.id;
+        } else {
+          versionId = await resolveVersionId({
+            client,
+            appId,
+            versionString,
+            platform,
+          });
         }
-        versionId = await resolveVersionId({
-          client,
-          appId,
-          versionString,
-          platform,
-        });
       }
 
       const localizationsResponse = await client.get<
         AscListResponse<AppStoreVersionLocalizationAttributes>
       >(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`, {
-        "fields[appStoreVersionLocalizations]": ["locale", "description"],
+        "fields[appStoreVersionLocalizations]": [
+          "locale",
+          "description",
+          "promotionalText",
+          "whatsNew",
+        ],
         limit: 200,
       });
 
@@ -202,19 +378,37 @@ program
       const sourceLocale =
         opts.sourceLocale ?? env.ascSourceLocale ?? "en-US";
 
-      let sourceText: string | undefined;
-      if (opts.sourceTextFile) {
-        sourceText = await readFile(opts.sourceTextFile, "utf8");
-      } else {
-        const source = localizations.find(
-          (item) => item.attributes?.locale === sourceLocale
-        );
-        sourceText = source?.attributes?.description;
+      const fieldsToSync = parseFields(opts.fields ?? env.ascSyncFields);
+      const sourceLocalization = localizations.find(
+        (item) => item.attributes?.locale === sourceLocale
+      );
+      const sourceDescriptionFile =
+        opts.sourceDescriptionFile ?? opts.sourceTextFile;
+      const sourceFiles: Partial<Record<LocalizationField, string>> = {
+        description: sourceDescriptionFile,
+        promotionalText: opts.sourcePromotionalTextFile,
+        whatsNew: opts.sourceWhatsNewFile,
+      };
+
+      const sourceTexts: Partial<Record<LocalizationField, string>> = {};
+      for (const field of fieldsToSync) {
+        const sourceFile = sourceFiles[field];
+        if (sourceFile) {
+          sourceTexts[field] = await readFile(sourceFile, "utf8");
+          continue;
+        }
+        const value = sourceLocalization?.attributes?.[
+          field
+        ] as string | undefined;
+        sourceTexts[field] = value;
       }
 
-      if (!sourceText) {
+      if (
+        fieldsToSync.includes("description") &&
+        sourceTexts.description === undefined
+      ) {
         throw new Error(
-          `Source description not found for locale ${sourceLocale}. Provide --source-text-file to override.`
+          `Source description not found for locale ${sourceLocale}. Provide --source-description-file to override.`
         );
       }
 
@@ -234,6 +428,23 @@ program
         throw new Error("No target locales provided or discovered.");
       }
 
+      const strictLimits =
+        opts.strictLimits ?? parseBoolean(env.ascStrictLimits) ?? false;
+      const limits: Record<LocalizationField, number | undefined> = {
+        description: resolveLimit(
+          opts.limitDescription ?? env.ascLimitDescription,
+          DEFAULT_LIMITS.description
+        ),
+        promotionalText: resolveLimit(
+          opts.limitPromotionalText ?? env.ascLimitPromotionalText,
+          DEFAULT_LIMITS.promotionalText
+        ),
+        whatsNew: resolveLimit(
+          opts.limitWhatsNew ?? env.ascLimitWhatsNew,
+          DEFAULT_LIMITS.whatsNew
+        ),
+      };
+
       const openaiApiKey = opts.openaiApiKey ?? env.openaiApiKey;
       const openaiModel = opts.openaiModel ?? env.openaiModel;
       const openaiBaseUrl = opts.openaiBaseUrl ?? env.openaiBaseUrl;
@@ -244,26 +455,94 @@ program
         baseUrl: openaiBaseUrl,
       };
 
+      if (resolvedVersion) {
+        const resolvedLabel =
+          resolvedVersion.attributes?.versionString ?? resolvedVersion.id;
+        console.log(`Resolved latest version: ${resolvedLabel} (${versionId})`);
+      }
       console.log(`Source locale: ${sourceLocale}`);
       console.log(`Target locales: ${targetLocales.join(", ")}`);
+      console.log(`Fields: ${fieldsToSync.join(", ")}`);
+
+      const missingSourceFields = fieldsToSync.filter(
+        (field) => sourceTexts[field] === undefined
+      );
+      if (missingSourceFields.length > 0) {
+        console.log(
+          `Skipping fields missing in source locale: ${missingSourceFields.join(
+            ", "
+          )}`
+        );
+      }
 
       for (const locale of targetLocales) {
         if (locale === sourceLocale) continue;
 
         console.log(`Translating -> ${locale}`);
-        const translated = await translateWithOpenAI({
-          config: openaiConfig,
-          sourceLocale,
-          targetLocale: locale,
-          text: sourceText,
-        });
-
         const existing = localizations.find(
           (item) => item.attributes?.locale === locale
         );
 
+        const updates: Partial<AppStoreVersionLocalizationAttributes> = {};
+
+        for (const field of fieldsToSync) {
+          const sourceText = sourceTexts[field];
+          if (sourceText === undefined) {
+            continue;
+          }
+
+          if (sourceText.length === 0) {
+            updates[field] = "";
+            if (opts.dryRun) {
+              console.log(`[dry-run] ${locale} ${field} length=0`);
+            }
+            if (opts.preview) {
+              console.log(`[preview] ${locale} ${field} (empty)`);
+            }
+            continue;
+          }
+
+          const translated = await translateWithOpenAI({
+            config: openaiConfig,
+            sourceLocale,
+            targetLocale: locale,
+            text: sourceText,
+            fieldName: FIELD_LABELS[field],
+          });
+
+          const limit = limits[field];
+          if (limit !== undefined && translated.length > limit) {
+            const message = `${FIELD_LABELS[field]} for ${locale} exceeds limit (${translated.length}/${limit})`;
+            if (strictLimits) {
+              throw new Error(message);
+            }
+            console.log(`[limit] ${message} -> skipping field`);
+            continue;
+          }
+
+          updates[field] = translated;
+
+          if (opts.dryRun) {
+            console.log(
+              `[dry-run] ${locale} ${field} length=${translated.length}`
+            );
+          }
+          if (opts.preview) {
+            console.log(`[preview] ${locale} ${field}`);
+            console.log(translated);
+          }
+        }
+
         if (opts.dryRun) {
-          console.log(`[dry-run] ${locale} length=${translated.length}`);
+          const updatedFields = Object.keys(updates);
+          if (updatedFields.length === 0) {
+            console.log(`[dry-run] ${locale} no updates`);
+          }
+          continue;
+        }
+
+        if (Object.keys(updates).length === 0) {
+          console.log(`Skipping ${locale} (no fields to update)`);
           continue;
         }
 
@@ -272,9 +551,7 @@ program
             data: {
               type: "appStoreVersionLocalizations",
               id: existing.id,
-              attributes: {
-                description: translated,
-              },
+              attributes: updates,
             },
           });
           console.log(`Updated ${locale}`);
@@ -284,7 +561,7 @@ program
               type: "appStoreVersionLocalizations",
               attributes: {
                 locale,
-                description: translated,
+                ...updates,
               },
               relationships: {
                 appStoreVersion: {

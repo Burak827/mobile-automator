@@ -16,9 +16,12 @@ export type AppStoreVersionAttributes = {
   versionString?: string;
   appVersionState?: string;
   platform?: string;
+  createdDate?: string;
 };
 
 export type AppStoreVersionLocalizationAttributes = {
   locale?: string;
   description?: string;
+  promotionalText?: string;
+  whatsNew?: string;
 };
