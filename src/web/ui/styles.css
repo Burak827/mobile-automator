@@ -19,7 +19,7 @@
 
 body {
   margin: 0;
-  padding: 24px;
+  padding: 14px;
   font-family: "Space Grotesk", sans-serif;
   color: var(--ink);
   background:
@@ -95,6 +95,20 @@ p {
   margin-bottom: 12px;
 }
 
+.card-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-btn {
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 50%;
+}
+
 .card-actions {
   display: flex;
   gap: 8px;
@@ -107,9 +121,13 @@ p {
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
-  min-height: calc(100vh - 48px);
+  height: calc(100vh - 70px);
+}
+
+.app-shell.console-expanded {
+  height: calc(100vh - 320px);
 }
 
 .layout {
@@ -121,7 +139,6 @@ p {
 
 .layout-sidebar-cell {
   position: relative;
-  min-height: 360px;
 }
 
 .sidebar {
@@ -135,11 +152,10 @@ p {
 
 .content {
   padding: 16px;
-  min-height: 0;
 }
 
 .placeholder-card {
-  min-height: 220px;
+  min-height: 143px;
 }
 
 .meta-grid {
@@ -204,7 +220,8 @@ p {
   list-style: none;
   padding: 0;
   margin: 12px 0 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   overflow-y: auto;
   flex: 1;
@@ -391,6 +408,7 @@ button:hover {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .store-section .card-head {
@@ -563,12 +581,53 @@ button:hover {
 }
 
 .console-dock {
-  padding: 12px;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 8px 14px 10px;
+  background: #0f1720;
+  border-top: 1px solid #22303f;
+  box-shadow: 0 -8px 20px rgba(6, 11, 16, 0.35);
+}
+
+.console-head {
+  margin-bottom: 6px;
+  color: #d4e8f4;
+}
+
+.console-dock.collapsed .console-head {
+  margin-bottom: 4px;
+}
+
+.console-dock .ghost-button {
+  background: #18242f;
+  color: #d4e8f4;
+  border: 1px solid #2b3c4d;
+}
+
+.console-line {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #d4e8f4;
+  padding: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .console-box {
-  min-height: 220px;
-  max-height: 420px;
+  min-height: 180px;
+  max-height: 40vh;
+  resize: vertical;
+  border: none;
+  border-radius: 6px;
+  background: #131920;
+  margin: 0;
 }
 
 @keyframes slide-in {
@@ -592,8 +651,12 @@ button:hover {
   }
 
   .app-shell {
-    min-height: auto;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: calc(100vh - 80px);
+  }
+
+  .app-shell.console-expanded {
+    height: calc(100vh - 300px);
   }
 
   .two-col,

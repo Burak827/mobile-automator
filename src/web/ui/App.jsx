@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Button from './components/atoms/Button.jsx';
 import AppDetailsPanel from './components/organisms/AppDetailsPanel.jsx';
 import AppListSidebar from './components/organisms/AppListSidebar.jsx';
 import CreateAppDialog from './components/organisms/CreateAppDialog.jsx';
@@ -107,6 +108,7 @@ export default function App() {
   const [playDetail, setPlayDetail] = useState(null);
   const [isIosLoading, setIsIosLoading] = useState(false);
   const [isPlayLoading, setIsPlayLoading] = useState(false);
+  const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
 
   useEffect(() => {
     selectedAppIdRef.current = selectedAppId;
@@ -249,6 +251,13 @@ export default function App() {
   }, [loadApps, loadMeta]);
 
   const stores = useMemo(() => Object.values(meta?.storeRules || {}), [meta]);
+  const latestStatusLine = useMemo(
+    () =>
+      statusLogs.length > 0
+        ? statusLogs[statusLogs.length - 1]
+        : '[Sistem] Güncelleme ve olay logları burada görünecek.',
+    [statusLogs]
+  );
 
   const localeOptions = useMemo(() => {
     const fallback = [{ locale: 'en-US', iosSupported: true, androidSupported: true }];
@@ -450,8 +459,8 @@ export default function App() {
       <div className="bg-shape bg-shape-a"></div>
       <div className="bg-shape bg-shape-b"></div>
 
-      <div className="app-shell">
-        <HeaderBar onOpenRules={() => setIsRulesOpen(true)} />
+      <div className={`app-shell ${isConsoleExpanded ? 'console-expanded' : 'console-collapsed'}`}>
+        <HeaderBar />
 
         <main className="layout">
           <div className="layout-sidebar-cell">
@@ -465,6 +474,7 @@ export default function App() {
                 void handleRefreshApps();
               }}
               onOpenCreate={() => setIsCreateOpen(true)}
+              onOpenRules={() => setIsRulesOpen(true)}
             />
           </div>
 
@@ -521,17 +531,25 @@ export default function App() {
           )}
         </section>
 
-        <section className="card console-dock">
-          <div className="card-head">
-            <h3>Konsol</h3>
-          </div>
-          <pre className="code-box console-box">
-            {statusLogs.length > 0
-              ? statusLogs.join('\n')
-              : '[Sistem] Güncelleme ve olay logları burada görünecek.'}
-          </pre>
-        </section>
       </div>
+
+      <section className={`console-dock ${isConsoleExpanded ? 'expanded' : 'collapsed'}`}>
+        <div className="card-head console-head">
+          <h3>Konsol</h3>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setIsConsoleExpanded((prev) => !prev)}
+          >
+            {isConsoleExpanded ? 'Küçült' : 'Büyüt'}
+          </Button>
+        </div>
+        {isConsoleExpanded ? (
+          <pre className="code-box console-box">{statusLogs.join('\n') || latestStatusLine}</pre>
+        ) : (
+          <div className="console-line">{latestStatusLine}</div>
+        )}
+      </section>
 
       <CreateAppDialog
         isOpen={isCreateOpen}

@@ -125,12 +125,17 @@ function StoreLocalePanel({
   const fallbackLocale = (sourceLocale || '').trim();
   const selectedValue = selectedLocale || fallbackLocale;
   const selectOptions = hasLocales ? locales : [fallbackLocale];
+  const versionString =
+    store === 'app_store' && typeof detail?.versionString === 'string'
+      ? detail.versionString.trim()
+      : '';
+  const storeMeta = versionString ? `${store} | version: ${versionString}` : store;
 
   return (
     <article className="store-panel card">
       <div className="card-head store-panel-head">
         <h3>{title}</h3>
-        <small>{store}</small>
+        <small>{storeMeta}</small>
       </div>
 
       <label>

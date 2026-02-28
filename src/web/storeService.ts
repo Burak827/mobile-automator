@@ -30,6 +30,7 @@ export type AppStoreSnapshot = {
   store: "app_store";
   appId: string;
   versionId: string;
+  versionString?: string;
   locales: AppStoreLocaleSnapshot[];
   appInfoNames: Array<{
     locale: string;
@@ -120,6 +121,11 @@ type AscVersionResponse = {
   }>;
 };
 
+type ResolvedAscVersion = {
+  versionId: string;
+  versionString?: string;
+};
+
 type AscLocalizationListResponse = {
   data: Array<{
     id: string;
@@ -189,7 +195,10 @@ export class StoreApiService {
     return new GpcClient({ serviceAccountKeyPath });
   }
 
-  private async resolveLatestAscVersionId(client: AscClient, appId: string): Promise<string> {
+  private async resolveLatestAscVersion(
+    client: AscClient,
+    appId: string
+  ): Promise<ResolvedAscVersion> {
     const response = await client.get<AscVersionResponse>(
       `/v1/apps/${appId}/appStoreVersions`,
       {
@@ -231,7 +240,16 @@ export class StoreApiService {
       }
     }
 
-    return latest.id;
+    const rawVersionString = latest.attributes?.versionString;
+    const versionString =
+      typeof rawVersionString === "string" && rawVersionString.trim().length > 0
+        ? rawVersionString.trim()
+        : undefined;
+
+    return {
+      versionId: latest.id,
+      versionString,
+    };
   }
 
   async testAppStoreConnection(app: AppRecord): Promise<StoreConnectionResult> {
@@ -304,7 +322,8 @@ export class StoreApiService {
     }
 
     const client = this.resolveAscClient();
-    const versionId = await this.resolveLatestAscVersionId(client, ascAppId);
+    const resolvedVersion = await this.resolveLatestAscVersion(client, ascAppId);
+    const versionId = resolvedVersion.versionId;
 
     let localizationPayload: AscLocalizationListResponse;
     try {
@@ -411,6 +430,7 @@ export class StoreApiService {
       store: "app_store",
       appId: ascAppId,
       versionId,
+      versionString: resolvedVersion.versionString,
       locales,
       appInfoNames,
       fetchedAt: nowIso(),

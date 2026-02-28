@@ -204,6 +204,7 @@ function buildAppStoreDetailEntries(snapshot: AppStoreSnapshot): Array<{
           locale,
           appId: snapshot.appId,
           versionId: snapshot.versionId,
+          versionString: snapshot.versionString,
           fetchedAt: snapshot.fetchedAt,
           versionLocalization: localization
             ? {
@@ -471,6 +472,7 @@ app.post("/api/apps/:id/locales/sync", async (req, res, next) => {
           detailCount: detailEntries.length,
           appId: snapshot.appId,
           versionId: snapshot.versionId,
+          versionString: snapshot.versionString,
           fetchedAt: snapshot.fetchedAt,
         };
         syncedStoreCount += 1;

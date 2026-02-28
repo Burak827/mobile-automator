@@ -6,11 +6,23 @@ export default function AppListSidebar({
   onSelectApp,
   onRefreshApps,
   onOpenCreate,
+  onOpenRules,
 }) {
   return (
     <aside className="card sidebar">
       <div className="card-head">
-        <h2>Uygulamalar</h2>
+        <div className="card-head-left">
+          <h2>Uygulamalar</h2>
+          <Button
+            type="button"
+            variant="icon"
+            title="Mağaza Kuralları"
+            onClick={onOpenRules}
+            className="info-btn"
+          >
+            i
+          </Button>
+        </div>
         <div className="card-actions">
           <Button
             type="button"
