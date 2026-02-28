@@ -11,8 +11,9 @@
     "build": "tsc -p tsconfig.json",
     "web": "npm run web:ui:build && WEB_ENABLE_UI=true npm run web:api",
     "web:api": "tsx src/web/server.ts",
-    "web:ui:dev": "vite --config src/web/ui/vite.config.mjs",
-    "web:ui:build": "vite build --config src/web/ui/vite.config.mjs",
+    "web:ui:dev": "vite --config src/web/ui/vite.config.ts",
+    "web:ui:typecheck": "tsc -p src/web/ui/tsconfig.json",
+    "web:ui:build": "vite build --config src/web/ui/vite.config.ts",
     "web:build": "npm run web:ui:build && npm run build && mkdir -p dist/web/public && cp -R src/web/public/. dist/web/public/"
   },
   "dependencies": {
@@ -28,6 +29,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^22.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3",

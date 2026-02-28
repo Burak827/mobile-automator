@@ -14,3 +14,14 @@ export type GpcEdit = {
   id?: string;
   expiryTimeSeconds?: string;
 };
+
+export type GpcImage = {
+  id?: string;
+  url?: string;
+  sha1?: string;
+  sha256?: string;
+};
+
+export type GpcImagesListResponse = {
+  images?: GpcImage[];
+};

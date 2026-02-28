@@ -1,12 +1,20 @@
-import Button from '../atoms/Button.jsx';
-import { useDialogController } from '../../hooks/useDialogController.js';
+import Button from '../atoms/Button';
+import { useDialogController } from '../../hooks/useDialogController';
+import type { StoreFieldRule, StoreRuleSet } from '../../types';
+
+type Props = {
+  isOpen: boolean;
+  stores: StoreRuleSet[];
+  onClose: () => void;
+  onReload: () => void;
+};
 
 export default function RulesDialog({
   isOpen,
   stores,
   onClose,
   onReload,
-}) {
+}: Props) {
   const dialogRef = useDialogController(isOpen, onClose);
 
   return (
@@ -46,16 +54,17 @@ export default function RulesDialog({
 
                 <div>
                   {Object.entries(store.fields).map(([field, rule]) => {
-                    const unit = rule.unit || 'chars';
-                    const saveRequired = rule.requiredForSave ? 'save: required' : 'save: optional';
-                    const publishRequired = rule.requiredForPublish
+                    const typedRule = rule as StoreFieldRule;
+                    const unit = typedRule.unit || 'chars';
+                    const saveRequired = typedRule.requiredForSave ? 'save: required' : 'save: optional';
+                    const publishRequired = typedRule.requiredForPublish
                       ? 'publish: required'
                       : 'publish: optional';
                     const minText =
-                      typeof rule.minChars === 'number' ? `min ${rule.minChars}` : 'min n/a';
+                      typeof typedRule.minChars === 'number' ? `min ${typedRule.minChars}` : 'min n/a';
                     const maxText =
-                      typeof rule.maxChars === 'number'
-                        ? `max ${rule.maxChars} ${unit}`
+                      typeof typedRule.maxChars === 'number'
+                        ? `max ${typedRule.maxChars} ${unit}`
                         : 'max n/a';
 
                     return (

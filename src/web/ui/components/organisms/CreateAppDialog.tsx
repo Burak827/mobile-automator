@@ -1,6 +1,17 @@
-import Button from '../atoms/Button.jsx';
-import AppConfigFields from '../molecules/AppConfigFields.jsx';
-import { useDialogController } from '../../hooks/useDialogController.js';
+import Button from '../atoms/Button';
+import AppConfigFields from '../molecules/AppConfigFields';
+import { useDialogController } from '../../hooks/useDialogController';
+import type { FormEvent } from 'react';
+import type { AppConfigField, AppConfigForm, LocaleCatalogEntry } from '../../types';
+
+type Props = {
+  isOpen: boolean;
+  form: AppConfigForm;
+  localeOptions: LocaleCatalogEntry[];
+  onClose: () => void;
+  onChange: (field: AppConfigField, value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
 
 export default function CreateAppDialog({
   isOpen,
@@ -9,7 +20,7 @@ export default function CreateAppDialog({
   onClose,
   onChange,
   onSubmit,
-}) {
+}: Props) {
   const dialogRef = useDialogController(isOpen, onClose);
 
   return (

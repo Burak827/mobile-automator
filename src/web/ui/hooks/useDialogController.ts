@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 
-export function useDialogController(isOpen, onRequestClose) {
-  const dialogRef = useRef(null);
+export function useDialogController(
+  isOpen: boolean,
+  onRequestClose: () => void
+) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;

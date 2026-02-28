@@ -1,11 +1,28 @@
-import SourceLocaleSelect from '../atoms/SourceLocaleSelect.jsx';
-import TextInput from '../atoms/TextInput.jsx';
+import SourceLocaleSelect from '../atoms/SourceLocaleSelect';
+import TextInput from '../atoms/TextInput';
+import type { AppConfigField, AppConfigForm, LocaleCatalogEntry } from '../../types';
 
-export const APP_FORM_FIELDS = [
-  { key: 'canonicalName', label: 'Canonical Name', required: true },
+type SecondaryField = Exclude<AppConfigField, "canonicalName" | "sourceLocale">;
+
+export const APP_FORM_FIELDS: Array<{
+  key: SecondaryField;
+  label: string;
+  required?: boolean;
+}> = [
   { key: 'ascAppId', label: 'ASC App ID' },
   { key: 'androidPackageName', label: 'Android Package Name' },
-];
+] as const;
+
+const SECONDARY_FIELDS = APP_FORM_FIELDS;
+
+type Props = {
+  value: AppConfigForm;
+  localeOptions: LocaleCatalogEntry[];
+  onChange: (field: AppConfigField, value: string) => void;
+  sourceLocaleLabel?: string;
+  sourceLocaleName?: string;
+  sourceLocaleRequired?: boolean;
+};
 
 export default function AppConfigFields({
   value,
@@ -14,7 +31,7 @@ export default function AppConfigFields({
   sourceLocaleLabel = 'Source Locale',
   sourceLocaleName = 'sourceLocale',
   sourceLocaleRequired = true,
-}) {
+}: Props) {
   return (
     <>
       <label>
@@ -38,7 +55,7 @@ export default function AppConfigFields({
         />
       </label>
 
-      {APP_FORM_FIELDS.slice(1).map((field) => (
+      {SECONDARY_FIELDS.map((field) => (
         <label key={field.key}>
           {field.label}
           <TextInput

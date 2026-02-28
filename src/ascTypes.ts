@@ -26,3 +26,22 @@ export type AppStoreVersionLocalizationAttributes = {
   whatsNew?: string;
   keywords?: string;
 };
+
+export type AppScreenshotSetAttributes = {
+  screenshotDisplayType?: string;
+};
+
+export type AppScreenshotAttributes = {
+  fileSize?: number;
+  fileName?: string;
+  imageAsset?: {
+    templateUrl?: string;
+    width?: number;
+    height?: number;
+  };
+};
+
+export type AscIncludedResponse<TAttributes, TIncluded = unknown> = {
+  data: Array<AscResource<TAttributes>>;
+  included?: Array<AscResource<TIncluded>>;
+};

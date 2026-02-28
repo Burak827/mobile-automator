@@ -1,5 +1,18 @@
-import Button from '../atoms/Button.jsx';
-import AppConfigFields from '../molecules/AppConfigFields.jsx';
+import Button from '../atoms/Button';
+import AppConfigFields from '../molecules/AppConfigFields';
+import type { FormEvent } from 'react';
+import type { AppConfigField, AppConfigForm, AppRecord, LocaleCatalogEntry } from '../../types';
+
+type Props = {
+  selectedApp: AppRecord | null;
+  appConfig: AppConfigForm;
+  localeOptions: LocaleCatalogEntry[];
+  hasConfigChanges: boolean;
+  isApplyingConfig: boolean;
+  onChangeConfig: (field: AppConfigField, value: string) => void;
+  onSubmitConfig: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteApp: () => void;
+};
 
 export default function AppDetailsPanel({
   selectedApp,
@@ -10,7 +23,7 @@ export default function AppDetailsPanel({
   onChangeConfig,
   onSubmitConfig,
   onDeleteApp,
-}) {
+}: Props) {
   if (!selectedApp) {
     return (
       <section className="card content placeholder-card">

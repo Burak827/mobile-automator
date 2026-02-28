@@ -1,10 +1,27 @@
 import { AscClient } from "../ascClient.js";
-import { AppStoreVersionAttributes } from "../ascTypes.js";
+import {
+  AppStoreVersionAttributes,
+  AppScreenshotSetAttributes,
+  AppScreenshotAttributes,
+  AscResource,
+} from "../ascTypes.js";
 import { loadEnvConfig, requireValue } from "../config.js";
 import { GpcClient } from "../gpcClient.js";
+import { GpcImagesListResponse } from "../gpcTypes.js";
 import { AppRecord, LocaleRecord } from "./db.js";
 import { toCanonical } from "./localeCatalog.js";
 import { type StoreId } from "./storeRules.js";
+
+export type ScreenshotImage = {
+  url: string;
+  width: number;
+  height: number;
+};
+
+export type ScreenshotEntry = {
+  displayType: string;
+  images: ScreenshotImage[];
+};
 
 export type LocaleSnapshot = {
   locale: string;
@@ -18,12 +35,14 @@ export type AppStoreLocaleSnapshot = LocaleSnapshot & {
   keywords?: string;
   supportUrl?: string;
   marketingUrl?: string;
+  screenshots?: ScreenshotEntry[];
 };
 
 export type PlayStoreLocaleSnapshot = LocaleSnapshot & {
   title?: string;
   shortDescription?: string;
   fullDescription?: string;
+  screenshots?: ScreenshotEntry[];
 };
 
 export type AppStoreSnapshot = {
@@ -161,6 +180,26 @@ type AscAppInfoLocalizationResponse = {
     };
   }>;
 };
+
+type AscScreenshotSetsResponse = {
+  data: Array<AscResource<AppScreenshotSetAttributes> & {
+    relationships?: {
+      appScreenshots?: {
+        data?: Array<{ id: string; type: string }>;
+      };
+    };
+  }>;
+  included?: Array<AscResource<AppScreenshotAttributes>>;
+};
+
+function ascTemplateUrlToReal(templateUrl: string, width: number, height: number): string {
+  return templateUrl
+    .replace("{w}", String(width))
+    .replace("{h}", String(height))
+    .replace("{f}", "png");
+}
+
+const GPC_IMAGE_TYPES = ["phoneScreenshots"] as const;
 
 type GpcListingsListResponse = {
   listings?: Array<{
@@ -358,13 +397,62 @@ export class StoreApiService {
       );
     }
 
-    const locales: AppStoreLocaleSnapshot[] = [];
-    for (const row of localizationPayload.data ?? []) {
+    const validRows = (localizationPayload.data ?? []).filter(
+      (row) => row.attributes?.locale
+    );
+
+    // Fetch screenshots for all locales in parallel
+    const screenshotResults = await Promise.allSettled(
+      validRows.map(async (row) => {
+        const setsResponse = await client.get<AscScreenshotSetsResponse>(
+          `/v1/appStoreVersionLocalizations/${row.id}/appScreenshotSets`,
+          {
+            "fields[appScreenshotSets]": ["screenshotDisplayType"],
+            include: ["appScreenshots"],
+            "fields[appScreenshots]": ["imageAsset", "fileName"],
+            limit: 200,
+          }
+        );
+
+        const includedById = new Map<string, AscResource<AppScreenshotAttributes>>();
+        for (const inc of setsResponse.included ?? []) {
+          includedById.set(inc.id, inc);
+        }
+
+        const entries: ScreenshotEntry[] = [];
+        for (const setItem of setsResponse.data ?? []) {
+          const displayType = setItem.attributes?.screenshotDisplayType;
+          if (!displayType) continue;
+
+          const relIds = setItem.relationships?.appScreenshots?.data ?? [];
+          const images: ScreenshotImage[] = [];
+          for (const rel of relIds) {
+            const included = includedById.get(rel.id);
+            const asset = included?.attributes?.imageAsset;
+            if (asset?.templateUrl && asset.width && asset.height) {
+              images.push({
+                url: ascTemplateUrlToReal(asset.templateUrl, asset.width, asset.height),
+                width: asset.width,
+                height: asset.height,
+              });
+            }
+          }
+
+          if (images.length > 0) {
+            entries.push({ displayType, images });
+          }
+        }
+        return entries.length > 0 ? entries : undefined;
+      })
+    );
+
+    const locales: AppStoreLocaleSnapshot[] = validRows.map((row, i) => {
       const attrs = row.attributes ?? {};
-      const rawLocale = attrs.locale;
-      if (!rawLocale) continue;
-      const locale = toCanonical(rawLocale);
-      locales.push({
+      const locale = toCanonical(attrs.locale!);
+      const result = screenshotResults[i];
+      const screenshots = result.status === "fulfilled" ? result.value : undefined;
+
+      return {
         locale,
         lengths: {
           description: attrs.description?.length ?? 0,
@@ -380,8 +468,9 @@ export class StoreApiService {
         keywords: attrs.keywords,
         supportUrl: attrs.supportUrl,
         marketingUrl: attrs.marketingUrl,
-      });
-    }
+        screenshots,
+      };
+    });
     locales.sort((a, b) => a.locale.localeCompare(b.locale));
 
     const appInfos = await client.get<AscAppInfoListResponse>(`/v1/apps/${ascAppId}/appInfos`, {
@@ -451,11 +540,38 @@ export class StoreApiService {
         `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings`
       );
 
-      const locales: PlayStoreLocaleSnapshot[] = [];
-      for (const listing of payload.listings ?? []) {
-        if (!listing.language) continue;
-        locales.push({
-          locale: toCanonical(listing.language),
+      const validListings = (payload.listings ?? []).filter(
+        (listing) => listing.language
+      );
+
+      // Fetch screenshots for all locales in parallel
+      const screenshotResults = await Promise.allSettled(
+        validListings.map(async (listing) => {
+          const entries: ScreenshotEntry[] = [];
+          for (const imageType of GPC_IMAGE_TYPES) {
+            const imagesResponse = await client.get<GpcImagesListResponse>(
+              `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${listing.language}/${imageType}`
+            );
+            const images: ScreenshotImage[] = [];
+            for (const img of imagesResponse.images ?? []) {
+              if (img.url) {
+                images.push({ url: img.url, width: 0, height: 0 });
+              }
+            }
+            if (images.length > 0) {
+              entries.push({ displayType: imageType, images });
+            }
+          }
+          return entries.length > 0 ? entries : undefined;
+        })
+      );
+
+      const locales: PlayStoreLocaleSnapshot[] = validListings.map((listing, i) => {
+        const result = screenshotResults[i];
+        const screenshots = result.status === "fulfilled" ? result.value : undefined;
+
+        return {
+          locale: toCanonical(listing.language!),
           lengths: {
             title: listing.title?.length ?? 0,
             shortDescription: listing.shortDescription?.length ?? 0,
@@ -464,8 +580,9 @@ export class StoreApiService {
           title: listing.title,
           shortDescription: listing.shortDescription,
           fullDescription: listing.fullDescription,
-        });
-      }
+          screenshots,
+        };
+      });
       locales.sort((a, b) => a.locale.localeCompare(b.locale));
 
       return {

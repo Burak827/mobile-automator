@@ -102,11 +102,11 @@ p {
 }
 
 .info-btn {
-  font-size: 13px;
-  font-style: italic;
-  font-weight: 600;
-  padding: 2px 7px;
+  padding: 4px;
   border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .card-actions {
@@ -124,10 +124,15 @@ p {
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
   height: calc(100vh - 70px);
+  transition: padding-right 180ms ease;
 }
 
 .app-shell.console-expanded {
   height: calc(100vh - 320px);
+}
+
+.app-shell.changes-open {
+  padding-right: min(420px, 92vw);
 }
 
 .layout {
@@ -432,10 +437,30 @@ button:hover {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  max-height: min(76vh, 900px);
+  overflow: hidden;
+}
+
+.store-panel-top {
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ece5d6;
+  background: var(--card);
+}
+
+.store-panel-body {
+  margin-top: 8px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: grid;
+  gap: 12px;
 }
 
 .store-panel-head {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .store-panel-head small {
@@ -445,15 +470,52 @@ button:hover {
 }
 
 .store-requirement-note {
-  margin: 8px 0 10px;
+  margin: 8px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+.store-locale-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.store-locale-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.store-locale-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.store-locale-select {
+  width: clamp(120px, 36%, 180px);
+}
+
+.store-locale-delete-btn {
+  min-width: 34px;
+  padding: 7px 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.store-locale-add-btn {
+  min-width: 34px;
+  padding: 7px 9px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .store-fields {
   display: grid;
   gap: 10px;
   min-height: 0;
+  min-width: 0;
 }
 
 .store-field {
@@ -478,6 +540,83 @@ button:hover {
 
 .store-field-note {
   color: var(--muted);
+}
+
+.screenshot-section {
+  margin-top: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.screenshot-empty {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 10px;
+}
+
+.screenshot-group-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.screenshot-group-label {
+  font-size: 11px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--muted);
+  margin: 6px 0 4px;
+}
+
+.screenshot-grid {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.screenshot-thumb {
+  height: 100px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.screenshot-thumb:hover {
+  opacity: 0.8;
+}
+
+.screenshot-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  border: none;
+  padding: 0;
+  background: rgba(17, 21, 28, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.screenshot-dialog-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.screenshot-preview {
+  max-width: 90vw;
+  max-height: 80vh;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 .locale-matrix-section {
@@ -630,6 +769,131 @@ button:hover {
   margin: 0;
 }
 
+.changes-drawer-toggle {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 46;
+  border-radius: 10px 0 0 10px;
+  background: #0c4b66;
+  color: #fff;
+  border: 1px solid #0a3a50;
+  border-right: none;
+  padding: 10px 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+}
+
+.changes-drawer-toggle.open {
+  right: min(420px, 92vw);
+}
+
+.changes-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 62px;
+  width: min(420px, 92vw);
+  background: #fffdf8;
+  border-left: 1px solid var(--line);
+  box-shadow: -14px 0 28px rgba(26, 34, 42, 0.14);
+  z-index: 45;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+}
+
+.changes-drawer.open {
+  transform: translateX(0);
+}
+
+.changes-drawer.console-expanded {
+  bottom: 300px;
+}
+
+.changes-drawer-head {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #ece5d6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.changes-drawer-head span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.changes-drawer-list {
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.change-item {
+  border: 1px solid #e6dfd1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.change-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.change-item-head span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.change-field {
+  font-size: 12px;
+  color: var(--brand-strong);
+}
+
+.change-values {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 6px;
+}
+
+.change-values code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  background: #f3f7f9;
+  border: 1px solid #dce8ee;
+  border-radius: 6px;
+  padding: 4px 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.changes-drawer-actions {
+  padding: 10px 14px 12px;
+  border-top: 1px solid #ece5d6;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @keyframes slide-in {
   from {
     opacity: 0;
@@ -653,6 +917,7 @@ button:hover {
   .app-shell {
     grid-template-rows: auto auto minmax(0, 1fr);
     height: calc(100vh - 80px);
+    padding-right: 0;
   }
 
   .app-shell.console-expanded {
@@ -665,6 +930,32 @@ button:hover {
   .split-grid,
   .store-panels-grid {
     grid-template-columns: 1fr;
+  }
+
+  .changes-drawer-toggle.open {
+    right: min(92vw, 420px);
+  }
+
+  .changes-drawer {
+    width: min(92vw, 420px);
+  }
+
+  .changes-drawer.console-expanded {
+    bottom: 280px;
+  }
+
+  .store-locale-row {
+    align-items: flex-start;
+  }
+
+  .store-locale-select {
+    width: 160px;
+    max-width: 60%;
+  }
+
+  .store-locale-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .button-row {

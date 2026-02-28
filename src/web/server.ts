@@ -217,6 +217,7 @@ function buildAppStoreDetailEntries(snapshot: AppStoreSnapshot): Array<{
                 marketingUrl: localization.marketingUrl,
               }
             : undefined,
+          screenshots: localization?.screenshots,
           appInfo: appInfo
             ? {
                 name: appInfo.name,
@@ -249,6 +250,7 @@ function buildPlayStoreDetailEntries(snapshot: PlayStoreSnapshot): Array<{
         shortDescription: item.shortDescription,
         fullDescription: item.fullDescription,
       },
+      screenshots: item.screenshots,
     },
   }));
 }
