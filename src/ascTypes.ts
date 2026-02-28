@@ -24,4 +24,5 @@ export type AppStoreVersionLocalizationAttributes = {
   description?: string;
   promotionalText?: string;
   whatsNew?: string;
+  keywords?: string;
 };

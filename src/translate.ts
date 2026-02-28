@@ -75,12 +75,16 @@ export async function translateWithOpenAI(options: {
   text: string;
   fieldName?: string;
   maxLength?: number;
+  lengthUnit?: "characters" | "bytes";
+  storeName?: string;
 }): Promise<string> {
   const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
-  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
+  const lengthUnit = options.lengthUnit ?? "characters";
+  const store = options.storeName ?? "App Store";
+  const fieldHint = fieldName ? ` for the ${store} ${fieldName}` : "";
   const lengthHint =
     typeof maxLength === "number" && Number.isFinite(maxLength)
-      ? ` The translation must be ${Math.floor(maxLength)} characters or fewer.`
+      ? ` The translation must be ${Math.floor(maxLength)} ${lengthUnit} or fewer.`
       : "";
 
   return requestOpenAI({
@@ -89,7 +93,7 @@ export async function translateWithOpenAI(options: {
       {
         role: "system",
         content:
-          "You are a translation engine for App Store listing text. " +
+          `You are a translation engine for ${store} listing text. ` +
           "Translate accurately, keep line breaks and formatting, and return only the translated text.",
       },
       {
@@ -106,9 +110,13 @@ export async function shortenWithOpenAI(options: {
   text: string;
   fieldName?: string;
   maxLength: number;
+  lengthUnit?: "characters" | "bytes";
+  storeName?: string;
 }): Promise<string> {
   const { config, targetLocale, text, fieldName, maxLength } = options;
-  const fieldHint = fieldName ? ` for the App Store ${fieldName}` : "";
+  const lengthUnit = options.lengthUnit ?? "characters";
+  const store = options.storeName ?? "App Store";
+  const fieldHint = fieldName ? ` for the ${store} ${fieldName}` : "";
   const limit = Math.floor(maxLength);
 
   return requestOpenAI({
@@ -117,13 +125,13 @@ export async function shortenWithOpenAI(options: {
       {
         role: "system",
         content:
-          "You are a rewriting engine for App Store listing text. " +
+          `You are a rewriting engine for ${store} listing text. ` +
           "Shorten while preserving meaning, tone, and formatting. Do not add new info. Return only the shortened text.",
       },
       {
         role: "user",
         content:
-          `Shorten${fieldHint} in ${targetLocale} to ${limit} characters or fewer. ` +
+          `Shorten${fieldHint} in ${targetLocale} to ${limit} ${lengthUnit} or fewer. ` +
           "Keep line breaks and formatting. Return only the shortened text.\n\n" +
           text,
       },

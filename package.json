@@ -7,17 +7,30 @@
     "asc-auto": "dist/index.js"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json"
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -p tsconfig.json",
+    "web": "npm run web:ui:build && WEB_ENABLE_UI=true npm run web:api",
+    "web:api": "tsx src/web/server.ts",
+    "web:ui:dev": "vite --config src/web/ui/vite.config.mjs",
+    "web:ui:build": "vite build --config src/web/ui/vite.config.mjs",
+    "web:build": "npm run web:ui:build && npm run build && mkdir -p dist/web/public && cp -R src/web/public/. dist/web/public/"
   },
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
-    "jose": "^5.9.2"
+    "express": "^5.2.1",
+    "jose": "^5.9.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.12.0",
+    "@vitejs/plugin-react": "^5.1.4",
     "tsx": "^4.7.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vite": "^7.3.1"
   }
 }
