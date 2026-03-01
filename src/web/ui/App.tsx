@@ -19,6 +19,8 @@ import type {
   MetaPayload,
   PendingStoreChange,
   PendingStoreChangeMap,
+  PendingStoreFieldChange,
+  PendingStoreLocaleChange,
   PendingValueMap,
   PlayStoreLocaleDetail,
   StoreId,
@@ -161,12 +163,65 @@ function asPlayStoreDetail(detail: unknown): PlayStoreLocaleDetail | null {
   return store === 'play_store' ? (detail as PlayStoreLocaleDetail) : null;
 }
 
+type StoreDiffField = { field: string; newValue: string; oldValue: string };
+
+type StoreDiffEntry = {
+  sourceLocale: string;
+  targetLocale: string;
+  targetStore: StoreId;
+  isNewLocale: boolean;
+  fields: StoreDiffField[];
+};
+
+type StoreDiffResponse = {
+  entries: StoreDiffEntry[];
+  skipped: Array<{ locale: string; reason: string }>;
+};
+
+// Raw server response types (server uses iosLocale/playLocale naming)
+type RawIosToPlayResponse = {
+  entries: Array<{ iosLocale: string; playLocale: string; isNewLocale: boolean; fields: StoreDiffField[] }>;
+  skipped: Array<{ iosLocale: string; reason: string }>;
+};
+
+type RawPlayToIosResponse = {
+  entries: Array<{ playLocale: string; iosLocale: string; isNewLocale: boolean; fields: StoreDiffField[] }>;
+  skipped: Array<{ playLocale: string; reason: string }>;
+};
+
+function normalizeIosToPlayDiff(raw: RawIosToPlayResponse): StoreDiffResponse {
+  return {
+    entries: raw.entries.map((e) => ({
+      sourceLocale: e.iosLocale,
+      targetLocale: e.playLocale,
+      targetStore: 'play_store' as StoreId,
+      isNewLocale: e.isNewLocale,
+      fields: e.fields,
+    })),
+    skipped: raw.skipped.map((s) => ({ locale: s.iosLocale, reason: s.reason })),
+  };
+}
+
+function normalizePlayToIosDiff(raw: RawPlayToIosResponse): StoreDiffResponse {
+  return {
+    entries: raw.entries.map((e) => ({
+      sourceLocale: e.playLocale,
+      targetLocale: e.iosLocale,
+      targetStore: 'app_store' as StoreId,
+      isNewLocale: e.isNewLocale,
+      fields: e.fields,
+    })),
+    skipped: raw.skipped.map((s) => ({ locale: s.playLocale, reason: s.reason })),
+  };
+}
+
 export default function App() {
   const [meta, setMeta] = useState<MetaPayload | null>(null);
   const [apps, setApps] = useState<AppListItem[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
   const [selectedApp, setSelectedApp] = useState<AppRecord | null>(null);
   const selectedAppIdRef = useRef<number | null>(null);
+  const populateQueueFromDiffRef = useRef<(result: StoreDiffResponse, options?: { silent?: boolean }) => void>(() => {});
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -427,6 +482,84 @@ export default function App() {
     }
   }, [loadApps, pushStatus]);
 
+  /**
+   * Shared sync + refresh routine used by both the config/sync form
+   * and the locale-change apply flow.
+   *
+   * 1. Calls POST /api/apps/:id/locales/sync with the given storeScope
+   * 2. Refreshes sidebar counts and store panels via loadApps
+   * 3. Returns the sync errors array (empty on full success)
+   *
+   * The caller is responsible for setting/clearing isApplyingConfig.
+   */
+  const syncAndRefresh = useCallback(
+    async (
+      appId: number,
+      storeScope: 'both' | 'app_store' | 'play_store',
+      options?: { skipDiff?: boolean }
+    ): Promise<string[]> => {
+      const scopeLabel =
+        storeScope === 'both'
+          ? 'Her iki store'
+          : storeScope === 'app_store'
+            ? 'App Store'
+            : 'Play Store';
+      pushStatus(`${scopeLabel} eşzamanlanıyor...`);
+
+      let syncErrors: string[] = [];
+      try {
+        const syncResult = await api<SyncResponse>(
+          `/api/apps/${appId}/locales/sync`,
+          { method: 'POST', body: JSON.stringify({ storeScope }) }
+        );
+        syncErrors = (syncResult?.errors ?? []).map(
+          (e: { store?: string; message?: string }) =>
+            `[${e.store ?? '?'}] ${e.message ?? 'Bilinmeyen hata'}`
+        );
+      } catch (syncError) {
+        syncErrors = [syncError instanceof Error ? syncError.message : String(syncError)];
+      }
+
+      await loadApps(appId);
+
+      if (syncErrors.length > 0) {
+        pushStatus(`Eşzamanlama kısmi tamamlandı (${syncErrors.length} hata).`);
+        for (const msg of syncErrors) {
+          pushStatus(`  ${msg}`);
+        }
+      } else {
+        pushStatus('Eşzamanlama tamamlandı.');
+      }
+
+      // Auto-diff iOS ↔ Play Store after sync and populate queue (both directions)
+      if (!options?.skipDiff) {
+        let totalDiffs = 0;
+        try {
+          const raw = await api<RawIosToPlayResponse>(`/api/apps/${appId}/prepare-ios-to-play`);
+          const diff = normalizeIosToPlayDiff(raw);
+          if (diff.entries.length > 0) {
+            populateQueueFromDiffRef.current(diff, { silent: true });
+            totalDiffs += diff.entries.length;
+          }
+        } catch { /* best-effort */ }
+        try {
+          const raw = await api<RawPlayToIosResponse>(`/api/apps/${appId}/prepare-play-to-ios`);
+          const diff = normalizePlayToIosDiff(raw);
+          if (diff.entries.length > 0) {
+            populateQueueFromDiffRef.current(diff, { silent: true });
+            totalDiffs += diff.entries.length;
+          }
+        } catch { /* best-effort */ }
+        if (totalDiffs > 0) {
+          pushStatus(`iOS ↔ Play Store: ${totalDiffs} locale farkı kuyruğa eklendi.`);
+        }
+      }
+
+      return syncErrors;
+    },
+    [loadApps, pushStatus]
+  );
+
   const handleCreateFormChange = useCallback((field: AppConfigField, value: string) => {
     setCreateForm((prev) => ({ ...prev, [field]: value }));
   }, []);
@@ -467,46 +600,119 @@ export default function App() {
             method: 'PUT',
             body: JSON.stringify(toUpdatePayload(appConfig)),
           });
+          pushStatus('Konfigürasyon kaydedildi.');
         }
 
-        try {
-          const syncResult = await api<SyncResponse>(`/api/apps/${selectedAppId}/locales/sync`, {
-            method: 'POST',
-            body: JSON.stringify({ storeScope: 'both' }),
-          });
-
-          await selectApp(selectedAppId);
-
-          const errors = Array.isArray(syncResult?.errors) ? syncResult.errors : [];
-          if (hasConfigChanges) {
-            if (errors.length > 0) {
-              pushStatus(
-                `Konfigürasyon kaydedildi. Sync kısmi tamamlandı (${errors.length} hata).`
-              );
-            } else {
-              pushStatus('Konfigürasyon kaydedildi ve store verileri sync edildi.');
-            }
-          } else if (errors.length > 0) {
-            pushStatus(`Sync kısmi tamamlandı (${errors.length} hata).`);
-          } else {
-            pushStatus('Store verileri sync edildi.');
-          }
-        } catch (syncError) {
-          await selectApp(selectedAppId);
-          pushStatus(
-            `${hasConfigChanges ? 'Konfigürasyon kaydedildi fakat s' : 'S'}ync sırasında hata oluştu: ${
-              syncError instanceof Error ? syncError.message : String(syncError)
-            }`
-          );
-        }
+        await syncAndRefresh(selectedAppId, 'both');
       } catch (error) {
         pushStatus(error instanceof Error ? error.message : String(error));
       } finally {
         setIsApplyingConfig(false);
       }
     },
-    [appConfig, hasConfigChanges, pushStatus, selectApp, selectedAppId]
+    [appConfig, hasConfigChanges, pushStatus, selectedAppId, syncAndRefresh]
   );
+
+  const populateQueueFromDiff = useCallback(
+    (result: StoreDiffResponse, options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
+
+      if (result.entries.length === 0) {
+        if (!silent && result.skipped.length > 0) {
+          for (const s of result.skipped) {
+            pushStatus(`Atlandı: ${s.locale} — ${s.reason}`);
+          }
+        }
+        if (!silent) pushStatus('Store\'lar arasında fark yok.');
+        return;
+      }
+
+      const directionLabel = result.entries[0]?.targetStore === 'play_store'
+        ? 'iOS → Play Store'
+        : 'Play Store → iOS';
+
+      setPendingStoreChanges((prev) => {
+        const next: PendingStoreChangeMap = { ...prev };
+        let addedCount = 0;
+
+        for (const entry of result.entries) {
+          const { targetStore, targetLocale } = entry;
+
+          // Add locale "add" entry if new locale
+          if (entry.isNewLocale) {
+            const localeKey = toStoreLocaleChangeKey(targetStore, targetLocale);
+            if (!next[localeKey]) {
+              next[localeKey] = {
+                kind: 'locale',
+                key: localeKey,
+                store: targetStore,
+                locale: targetLocale,
+                action: 'add',
+              };
+            }
+          }
+
+          // Add field changes (only if not already in queue — queue takes priority)
+          for (const fd of entry.fields) {
+            const key = toStoreChangeKey(targetStore, targetLocale, fd.field);
+            if (next[key]) continue; // queue takes priority
+            next[key] = {
+              kind: 'field',
+              key,
+              store: targetStore,
+              locale: targetLocale,
+              field: fd.field,
+              oldValue: fd.oldValue,
+              newValue: fd.newValue,
+            };
+          }
+
+          addedCount++;
+        }
+
+        if (!silent) {
+          pushStatus(`Kuyruğa ${addedCount} locale farkı eklendi (${directionLabel}).`);
+        }
+        return next;
+      });
+
+      if (!silent && result.skipped.length > 0) {
+        for (const s of result.skipped) {
+          pushStatus(`Atlandı: ${s.locale} — ${s.reason}`);
+        }
+      }
+    },
+    [pushStatus]
+  );
+  populateQueueFromDiffRef.current = populateQueueFromDiff;
+
+  const handleCopyIosToPlay = useCallback(async () => {
+    if (!selectedAppId) return;
+
+    try {
+      const raw = await api<RawIosToPlayResponse>(
+        `/api/apps/${selectedAppId}/prepare-ios-to-play`
+      );
+      populateQueueFromDiff(normalizeIosToPlayDiff(raw));
+      setIsChangeDrawerOpen(true);
+    } catch (error) {
+      pushStatus(error instanceof Error ? error.message : String(error));
+    }
+  }, [populateQueueFromDiff, pushStatus, selectedAppId]);
+
+  const handleCopyPlayToIos = useCallback(async () => {
+    if (!selectedAppId) return;
+
+    try {
+      const raw = await api<RawPlayToIosResponse>(
+        `/api/apps/${selectedAppId}/prepare-play-to-ios`
+      );
+      populateQueueFromDiff(normalizePlayToIosDiff(raw));
+      setIsChangeDrawerOpen(true);
+    } catch (error) {
+      pushStatus(error instanceof Error ? error.message : String(error));
+    }
+  }, [populateQueueFromDiff, pushStatus, selectedAppId]);
 
   const handleDeleteApp = useCallback(async () => {
     if (!selectedAppId) return;
@@ -739,19 +945,168 @@ export default function App() {
   }, []);
 
   const handleApplyPendingChanges = useCallback(
-    (storeFilter?: StoreId) => {
-      const entries = Object.values(pendingStoreChanges).filter(
+    async (storeFilter?: StoreId) => {
+      if (!selectedAppId) return;
+
+      const allEntries = Object.values(pendingStoreChanges).filter(
         (entry) => !storeFilter || entry.store === storeFilter
       );
-      if (entries.length === 0) {
-        pushStatus(storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.');
+      const localeEntries = allEntries.filter(
+        (entry): entry is PendingStoreLocaleChange => entry.kind === 'locale'
+      );
+      const fieldEntries = allEntries.filter(
+        (entry): entry is PendingStoreFieldChange => entry.kind === 'field'
+      );
+
+      // Find field-only updates: fields for locales that have no locale add/remove entry
+      const localeActionKeys = new Set(localeEntries.map((e) => `${e.store}::${e.locale}`));
+      const fieldOnlyByLocale = new Map<string, PendingStoreFieldChange[]>();
+      for (const fe of fieldEntries) {
+        const localeKey = `${fe.store}::${fe.locale}`;
+        if (localeActionKeys.has(localeKey)) continue; // handled by locale add/remove
+        if (!fieldOnlyByLocale.has(localeKey)) fieldOnlyByLocale.set(localeKey, []);
+        fieldOnlyByLocale.get(localeKey)!.push(fe);
+      }
+
+      if (localeEntries.length === 0 && fieldOnlyByLocale.size === 0) {
+        pushStatus(
+          storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
+        );
         return;
       }
-      pushStatus(
-        `Store update işlemi henüz devreye alınmadı. ${entries.length} değişiklik listede tutuluyor.`
-      );
+
+      // Validate: new locale adds must have required fields in the change queue
+      const rules = meta?.storeRules;
+      const addEntries = localeEntries.filter((e) => e.action === 'add');
+
+      for (const addEntry of addEntries) {
+        const ruleSet = rules?.[addEntry.store];
+        if (!ruleSet) continue;
+
+        const missingFields: string[] = [];
+        for (const [fieldKey, fieldRule] of Object.entries(ruleSet.fields)) {
+          if (!fieldRule.requiredForSave) continue;
+          const changeKey = toStoreChangeKey(addEntry.store, addEntry.locale, fieldKey);
+          const fieldChange = pendingStoreChanges[changeKey];
+          if (!fieldChange || fieldChange.kind !== 'field' || !fieldChange.newValue.trim()) {
+            missingFields.push(fieldKey);
+          }
+        }
+
+        if (missingFields.length > 0) {
+          pushStatus(
+            `${addEntry.store}/${addEntry.locale} eklemek için zorunlu alanlar eksik: ${missingFields.join(', ')}. ` +
+            `Önce bu alanları doldurun.`
+          );
+          return;
+        }
+      }
+
+      // Build changes payload: locale add/remove + field-only updates
+      const changes: Array<{
+        store: StoreId;
+        locale: string;
+        action: string;
+        fields?: Record<string, string>;
+      }> = [];
+
+      for (const entry of localeEntries) {
+        if (entry.action !== 'add') {
+          changes.push({ store: entry.store, locale: entry.locale, action: entry.action });
+          continue;
+        }
+
+        const fields: Record<string, string> = {};
+        for (const change of allEntries) {
+          if (
+            change.kind === 'field' &&
+            change.store === entry.store &&
+            change.locale === entry.locale
+          ) {
+            fields[change.field] = change.newValue;
+          }
+        }
+
+        changes.push({ store: entry.store, locale: entry.locale, action: entry.action, fields });
+      }
+
+      // Add field-only updates as "update" action
+      for (const [, fieldChanges] of fieldOnlyByLocale) {
+        const first = fieldChanges[0];
+        const fields: Record<string, string> = {};
+        for (const fc of fieldChanges) {
+          fields[fc.field] = fc.newValue;
+        }
+        changes.push({ store: first.store, locale: first.locale, action: 'update', fields });
+      }
+
+      type ApplyResponse = {
+        succeeded: Array<{ store: StoreId; locale: string; action: string }>;
+        failed: Array<{ store: StoreId; locale: string; action: string; error: string }>;
+        appStoreLocales: string[];
+        playStoreLocales: string[];
+      };
+
+      setIsApplyingConfig(true);
+      try {
+        pushStatus(`${changes.length} değişiklik uygulanıyor...`);
+
+        const result = await api<ApplyResponse>(
+          `/api/apps/${selectedAppId}/locales/apply`,
+          { method: 'POST', body: JSON.stringify({ changes }) }
+        );
+
+        // Remove succeeded changes from pending
+        setPendingStoreChanges((prev) => {
+          const next = { ...prev };
+          for (const s of result.succeeded) {
+            if (s.action === 'add' || s.action === 'remove') {
+              const localeKey = toStoreLocaleChangeKey(s.store, s.locale);
+              delete next[localeKey];
+            }
+            // Remove associated field changes for add and update actions
+            if (s.action === 'add' || s.action === 'update') {
+              for (const key of Object.keys(next)) {
+                if (key.startsWith(`${s.store}::${s.locale}::`) && next[key]?.kind === 'field') {
+                  delete next[key];
+                }
+              }
+            }
+          }
+          return next;
+        });
+
+        if (result.failed.length > 0) {
+          pushStatus(
+            `Kısmi başarı: ${result.succeeded.length} başarılı, ${result.failed.length} başarısız.`
+          );
+          for (const f of result.failed) {
+            pushStatus(`  HATA [${f.store}/${f.locale}/${f.action}]: ${f.error}`);
+          }
+        } else {
+          pushStatus(`${result.succeeded.length} değişiklik uygulandı.`);
+        }
+
+        // Auto-sync affected stores via shared routine
+        const succeededStores = new Set(result.succeeded.map((s) => s.store));
+        if (succeededStores.size > 0) {
+          const storeScope =
+            succeededStores.has('app_store') && succeededStores.has('play_store')
+              ? 'both'
+              : succeededStores.has('app_store')
+                ? 'app_store'
+                : 'play_store';
+          await syncAndRefresh(selectedAppId, storeScope, { skipDiff: true });
+        }
+      } catch (error) {
+        pushStatus(
+          `Locale değişikliği sırasında hata: ${error instanceof Error ? error.message : String(error)}`
+        );
+      } finally {
+        setIsApplyingConfig(false);
+      }
     },
-    [pendingStoreChanges, pushStatus]
+    [meta?.storeRules, pendingStoreChanges, pushStatus, selectedAppId, syncAndRefresh]
   );
 
   return (
@@ -791,6 +1146,12 @@ export default function App() {
             onChangeConfig={handleAppConfigChange}
             onSubmitConfig={(event) => {
               void handleUpdateConfigSubmit(event);
+            }}
+            onCopyIosToPlay={() => {
+              void handleCopyIosToPlay();
+            }}
+            onCopyPlayToIos={() => {
+              void handleCopyPlayToIos();
             }}
             onDeleteApp={() => {
               void handleDeleteApp();
@@ -854,6 +1215,7 @@ export default function App() {
       <ChangeQueueDrawer
         isOpen={isChangeDrawerOpen}
         isConsoleExpanded={isConsoleExpanded}
+        isBusy={isApplyingConfig}
         changes={pendingChangeEntries}
         onToggle={() => setIsChangeDrawerOpen((prev) => !prev)}
         onClear={handleClearPendingChanges}

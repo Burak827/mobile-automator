@@ -21,6 +21,7 @@ function formatChangeTitle(change: PendingStoreChange): string {
 type Props = {
   isOpen: boolean;
   isConsoleExpanded: boolean;
+  isBusy: boolean;
   changes: PendingStoreChange[];
   onToggle: () => void;
   onClear: () => void;
@@ -31,6 +32,7 @@ type Props = {
 export default function ChangeQueueDrawer({
   isOpen,
   isConsoleExpanded,
+  isBusy,
   changes,
   onToggle,
   onClear,
@@ -90,17 +92,17 @@ export default function ChangeQueueDrawer({
         </div>
 
         <div className="changes-drawer-actions">
-          <Button type="button" variant="ghost" onClick={onClear} disabled={count === 0}>
+          <Button type="button" variant="ghost" onClick={onClear} disabled={count === 0 || isBusy}>
             Temizle
           </Button>
-          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('app_store')} disabled={iosCount === 0}>
-            iOS Güncelle ({iosCount})
+          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('app_store')} disabled={iosCount === 0 || isBusy}>
+            {isBusy ? 'İşleniyor...' : `iOS Güncelle (${iosCount})`}
           </Button>
-          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('play_store')} disabled={playCount === 0}>
-            Play Güncelle ({playCount})
+          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('play_store')} disabled={playCount === 0 || isBusy}>
+            {isBusy ? 'İşleniyor...' : `Play Güncelle (${playCount})`}
           </Button>
-          <Button type="button" variant="primary" onClick={onApply} disabled={count === 0}>
-            Güncelle
+          <Button type="button" variant="primary" onClick={onApply} disabled={count === 0 || isBusy}>
+            {isBusy ? 'İşleniyor...' : 'Güncelle'}
           </Button>
         </div>
       </aside>

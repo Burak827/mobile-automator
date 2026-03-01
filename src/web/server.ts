@@ -24,7 +24,9 @@ import {
 import {
   ALL_STORE_LOCALES,
   buildLocaleMatrix,
+  iosToPlayLocale,
   LOCALE_CATALOG,
+  playToIosLocale,
 } from "./localeCatalog.js";
 
 const env = loadEnvConfig();
@@ -537,6 +539,418 @@ app.post("/api/apps/:id/locales/sync", async (req, res, next) => {
     }
 
     res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Locale apply — add/remove locales on ASC & GPC
+// ---------------------------------------------------------------------------
+
+type LocaleChangeInput = {
+  store: StoreId;
+  locale: string;
+  action: "add" | "remove" | "update";
+  fields?: Record<string, string>;
+};
+
+function parseLocaleChanges(raw: unknown[]): LocaleChangeInput[] {
+  const result: LocaleChangeInput[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const store =
+      row.store === "app_store" || row.store === "play_store"
+        ? (row.store as StoreId)
+        : null;
+    const locale = typeof row.locale === "string" ? row.locale.trim() : "";
+    const action =
+      row.action === "add" || row.action === "remove" || row.action === "update"
+        ? (row.action as "add" | "remove" | "update")
+        : null;
+    if (!store || !locale || !action) continue;
+
+    let fields: Record<string, string> | undefined;
+    if ((action === "add" || action === "update") && row.fields && typeof row.fields === "object") {
+      fields = {};
+      for (const [key, val] of Object.entries(row.fields as Record<string, unknown>)) {
+        if (typeof val === "string") fields[key] = val;
+      }
+    }
+
+    result.push({ store, locale, action, fields });
+  }
+  return result;
+}
+
+function applyLocaleChangesToList(
+  current: string[],
+  changes: LocaleChangeInput[]
+): string[] {
+  const set = new Set(current);
+  for (const change of changes) {
+    if (change.action === "add") set.add(change.locale);
+    else if (change.action === "remove") set.delete(change.locale);
+    // "update" doesn't change the locale list
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+// ---------------------------------------------------------------------------
+// Prepare iOS → Play Store diff (returns changes to queue, does NOT apply)
+// ---------------------------------------------------------------------------
+
+app.get("/api/apps/:id/prepare-ios-to-play", (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    mustGetApp(appId);
+
+    const iosDetails = repo.listStoreLocaleDetails(appId, "app_store");
+    if (iosDetails.length === 0) {
+      res.status(400).json({ error: "iOS locale detayları bulunamadı. Önce eşzamanlayın." });
+      return;
+    }
+
+    // Build Play Store detail lookup
+    const playDetails = repo.listStoreLocaleDetails(appId, "play_store");
+    const playDetailByLocale = new Map<string, Record<string, unknown>>();
+    for (const pd of playDetails) {
+      try {
+        playDetailByLocale.set(pd.locale, JSON.parse(pd.detailJson) as Record<string, unknown>);
+      } catch { /* skip */ }
+    }
+
+    const playLocaleSet = new Set(
+      repo.listStoreLocales(appId)
+        .filter((r) => r.store === "play_store")
+        .map((r) => r.locale)
+    );
+
+    type FieldDiff = {
+      field: string;
+      newValue: string;
+      oldValue: string;
+    };
+
+    type DiffEntry = {
+      iosLocale: string;
+      playLocale: string;
+      isNewLocale: boolean;
+      fields: FieldDiff[];
+    };
+
+    type SkippedEntry = { iosLocale: string; reason: string };
+
+    const entries: DiffEntry[] = [];
+    const skipped: SkippedEntry[] = [];
+
+    for (const row of iosDetails) {
+      const playLocale = iosToPlayLocale(row.locale);
+      if (!playLocale) {
+        skipped.push({ iosLocale: row.locale, reason: "Play Store'da karşılığı yok" });
+        continue;
+      }
+
+      let detail: Record<string, unknown>;
+      try {
+        detail = JSON.parse(row.detailJson) as Record<string, unknown>;
+      } catch {
+        skipped.push({ iosLocale: row.locale, reason: "detail JSON parse hatası" });
+        continue;
+      }
+
+      const appInfo = detail.appInfo as { name?: string; subtitle?: string } | undefined;
+      const versionLoc = detail.versionLocalization as { description?: string } | undefined;
+
+      const iosTitle = appInfo?.name ?? "";
+      const iosShortDesc = appInfo?.subtitle ?? "";
+      const iosFullDesc = versionLoc?.description ?? "";
+
+      if (!iosTitle) {
+        skipped.push({ iosLocale: row.locale, reason: "appName (title) boş" });
+        continue;
+      }
+
+      const isNewLocale = !playLocaleSet.has(playLocale);
+
+      // Get current Play Store values for comparison
+      let playTitle = "";
+      let playShortDesc = "";
+      let playFullDesc = "";
+
+      if (!isNewLocale) {
+        const playDetail = playDetailByLocale.get(playLocale);
+        if (playDetail) {
+          const listing = playDetail.listing as {
+            title?: string;
+            shortDescription?: string;
+            fullDescription?: string;
+          } | undefined;
+          playTitle = listing?.title ?? "";
+          playShortDesc = listing?.shortDescription ?? "";
+          playFullDesc = listing?.fullDescription ?? "";
+        }
+      }
+
+      // Compute field diffs (trim trailing whitespace — GPC strips trailing newlines)
+      const norm = (s: string) => s.replace(/\s+$/, "");
+      const fields: FieldDiff[] = [];
+      if (norm(iosTitle) !== norm(playTitle)) {
+        fields.push({ field: "title", newValue: iosTitle, oldValue: playTitle });
+      }
+      if (norm(iosShortDesc) !== norm(playShortDesc)) {
+        fields.push({ field: "shortDescription", newValue: iosShortDesc, oldValue: playShortDesc });
+      }
+      if (norm(iosFullDesc) !== norm(playFullDesc)) {
+        fields.push({ field: "fullDescription", newValue: iosFullDesc, oldValue: playFullDesc });
+      }
+
+      // Only include if there are actual differences
+      if (fields.length > 0 || isNewLocale) {
+        entries.push({ iosLocale: row.locale, playLocale, isNewLocale, fields });
+      }
+    }
+
+    res.json({ appId, entries, skipped });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Prepare Play Store → iOS diff (returns changes to queue, does NOT apply)
+// ---------------------------------------------------------------------------
+
+app.get("/api/apps/:id/prepare-play-to-ios", (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    mustGetApp(appId);
+
+    const playDetails = repo.listStoreLocaleDetails(appId, "play_store");
+    if (playDetails.length === 0) {
+      res.status(400).json({ error: "Play Store locale detayları bulunamadı. Önce eşzamanlayın." });
+      return;
+    }
+
+    // Build iOS detail lookup
+    const iosDetails = repo.listStoreLocaleDetails(appId, "app_store");
+    const iosDetailByLocale = new Map<string, Record<string, unknown>>();
+    for (const d of iosDetails) {
+      try {
+        iosDetailByLocale.set(d.locale, JSON.parse(d.detailJson) as Record<string, unknown>);
+      } catch { /* skip */ }
+    }
+
+    const iosLocaleSet = new Set(
+      repo.listStoreLocales(appId)
+        .filter((r) => r.store === "app_store")
+        .map((r) => r.locale)
+    );
+
+    type FieldDiff = { field: string; newValue: string; oldValue: string };
+    type DiffEntry = {
+      playLocale: string;
+      iosLocale: string;
+      isNewLocale: boolean;
+      fields: FieldDiff[];
+    };
+    type SkippedEntry = { playLocale: string; reason: string };
+
+    const entries: DiffEntry[] = [];
+    const skipped: SkippedEntry[] = [];
+
+    for (const row of playDetails) {
+      const iosLocale = playToIosLocale(row.locale);
+      if (!iosLocale) {
+        skipped.push({ playLocale: row.locale, reason: "App Store'da karşılığı yok" });
+        continue;
+      }
+
+      let detail: Record<string, unknown>;
+      try {
+        detail = JSON.parse(row.detailJson) as Record<string, unknown>;
+      } catch {
+        skipped.push({ playLocale: row.locale, reason: "detail JSON parse hatası" });
+        continue;
+      }
+
+      const listing = detail.listing as {
+        title?: string;
+        shortDescription?: string;
+        fullDescription?: string;
+      } | undefined;
+
+      const playTitle = listing?.title ?? "";
+      const playShortDesc = listing?.shortDescription ?? "";
+      const playFullDesc = listing?.fullDescription ?? "";
+
+      if (!playTitle) {
+        skipped.push({ playLocale: row.locale, reason: "title (appName) boş" });
+        continue;
+      }
+
+      const isNewLocale = !iosLocaleSet.has(iosLocale);
+
+      // Get current iOS values for comparison
+      let iosAppName = "";
+      let iosSubtitle = "";
+      let iosDescription = "";
+
+      if (!isNewLocale) {
+        const iosDetail = iosDetailByLocale.get(iosLocale);
+        if (iosDetail) {
+          const appInfo = iosDetail.appInfo as { name?: string; subtitle?: string } | undefined;
+          const versionLoc = iosDetail.versionLocalization as { description?: string } | undefined;
+          iosAppName = appInfo?.name ?? "";
+          iosSubtitle = appInfo?.subtitle ?? "";
+          iosDescription = versionLoc?.description ?? "";
+        }
+      }
+
+      // Compute field diffs (trim trailing whitespace — stores may strip them)
+      const norm = (s: string) => s.replace(/\s+$/, "");
+      const fields: FieldDiff[] = [];
+
+      // Play title → iOS appName
+      if (norm(playTitle) !== norm(iosAppName)) {
+        fields.push({ field: "appName", newValue: playTitle, oldValue: iosAppName });
+      }
+      // Play shortDescription → iOS subtitle (shortDesc max 80, subtitle max 30 — may truncate)
+      if (norm(playShortDesc) !== norm(iosSubtitle)) {
+        const truncated = playShortDesc.length > 30 ? playShortDesc.slice(0, 30) : playShortDesc;
+        fields.push({ field: "subtitle", newValue: truncated, oldValue: iosSubtitle });
+      }
+      // Play fullDescription → iOS description
+      if (norm(playFullDesc) !== norm(iosDescription)) {
+        fields.push({ field: "description", newValue: playFullDesc, oldValue: iosDescription });
+      }
+
+      if (fields.length > 0 || isNewLocale) {
+        entries.push({ playLocale: row.locale, iosLocale, isNewLocale, fields });
+      }
+    }
+
+    res.json({ appId, entries, skipped });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    const appRow = mustGetApp(appId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const localeChanges = parseLocaleChanges(
+      Array.isArray(body.changes) ? body.changes : []
+    );
+
+    if (localeChanges.length === 0) {
+      res.status(400).json({ error: "No valid locale changes provided." });
+      return;
+    }
+
+    const ascChanges = localeChanges.filter((c) => c.store === "app_store");
+    const gpcChanges = localeChanges.filter((c) => c.store === "play_store");
+
+    const succeeded: LocaleChangeInput[] = [];
+    const failed: Array<LocaleChangeInput & { error: string }> = [];
+
+    // ASC — each locale independently, in parallel
+    if (ascChanges.length > 0) {
+      const results = await Promise.allSettled(
+        ascChanges.map(async (change) => {
+          if (change.action === "add") {
+            await storeApi.addAscLocale(appRow, change.locale, change.fields);
+          } else if (change.action === "update") {
+            await storeApi.updateAscLocaleFields(appRow, change.locale, change.fields ?? {});
+          } else {
+            await storeApi.deleteAscLocale(appRow, change.locale);
+          }
+        })
+      );
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const change = ascChanges[i];
+        if (result.status === "fulfilled") {
+          succeeded.push(change);
+        } else {
+          failed.push({
+            ...change,
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+          });
+        }
+      }
+    }
+
+    // GPC — all in one edit batch
+    if (gpcChanges.length > 0) {
+      const gpcAdds = gpcChanges
+        .filter((c) => c.action === "add" || c.action === "update")
+        .map((c) => ({ locale: c.locale, fields: c.fields ?? {} }));
+      const gpcRemoves = gpcChanges
+        .filter((c) => c.action === "remove")
+        .map((c) => c.locale);
+      try {
+        if (gpcAdds.length > 0 || gpcRemoves.length > 0) {
+          await storeApi.applyPlayStoreLocaleChanges(appRow, gpcAdds, gpcRemoves);
+        }
+        succeeded.push(...gpcChanges);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        for (const change of gpcChanges) {
+          failed.push({ ...change, error: message });
+        }
+      }
+    }
+
+    // Update DB for succeeded changes
+    if (succeeded.length > 0) {
+      const ascSucceeded = succeeded.filter((c) => c.store === "app_store");
+      const gpcSucceeded = succeeded.filter((c) => c.store === "play_store");
+
+      if (ascSucceeded.length > 0) {
+        const current = repo
+          .listStoreLocales(appId)
+          .filter((r) => r.store === "app_store")
+          .map((r) => r.locale);
+        const next = applyLocaleChangesToList(current, ascSucceeded);
+        repo.replaceStoreLocales(appId, "app_store", next);
+      }
+
+      if (gpcSucceeded.length > 0) {
+        const current = repo
+          .listStoreLocales(appId)
+          .filter((r) => r.store === "play_store")
+          .map((r) => r.locale);
+        const next = applyLocaleChangesToList(current, gpcSucceeded);
+        repo.replaceStoreLocales(appId, "play_store", next);
+      }
+    }
+
+    // Build response
+    const rows = repo.listStoreLocales(appId);
+    const appStoreLocales = rows
+      .filter((r) => r.store === "app_store")
+      .map((r) => r.locale);
+    const playStoreLocales = rows
+      .filter((r) => r.store === "play_store")
+      .map((r) => r.locale);
+
+    res.json({
+      appId,
+      succeeded,
+      failed,
+      appStoreLocales,
+      playStoreLocales,
+      completedAt: new Date().toISOString(),
+    });
   } catch (error) {
     next(error);
   }

@@ -9,7 +9,7 @@ import { loadEnvConfig, requireValue } from "../config.js";
 import { GpcClient } from "../gpcClient.js";
 import { GpcImagesListResponse } from "../gpcTypes.js";
 import { AppRecord, LocaleRecord } from "./db.js";
-import { toCanonical } from "./localeCatalog.js";
+import { toCanonical, toStoreLocale } from "./localeCatalog.js";
 import { type StoreId } from "./storeRules.js";
 
 export type ScreenshotImage = {
@@ -671,5 +671,220 @@ export class StoreApiService {
       },
       fetchedAt: nowIso(),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // ASC locale mutations
+  // ---------------------------------------------------------------------------
+
+  private async resolveAscAppInfoId(
+    client: AscClient,
+    ascAppId: string
+  ): Promise<string> {
+    const response = await client.get<AscAppInfoListResponse>(
+      `/v1/apps/${ascAppId}/appInfos`,
+      { limit: 1 }
+    );
+    const appInfoId = response.data?.[0]?.id;
+    if (!appInfoId) {
+      throw new Error(`No appInfo found for ascAppId: ${ascAppId}`);
+    }
+    return appInfoId;
+  }
+
+  async addAscLocale(
+    app: AppRecord,
+    canonicalLocale: string,
+    fields?: Record<string, string>
+  ): Promise<void> {
+    const ascAppId = app.ascAppId;
+    if (!ascAppId) throw new Error("ascAppId missing");
+
+    const client = this.resolveAscClient();
+    const { versionId } = await this.resolveLatestAscVersion(client, ascAppId);
+    const storeLocale = toStoreLocale(canonicalLocale, "app_store");
+
+    // Version localization: description, keywords, promotionalText, whatsNew
+    const versionAttrs: Record<string, string> = { locale: storeLocale };
+    if (fields?.description) versionAttrs.description = fields.description;
+    if (fields?.keywords) versionAttrs.keywords = fields.keywords;
+    if (fields?.promotionalText) versionAttrs.promotionalText = fields.promotionalText;
+    if (fields?.whatsNew) versionAttrs.whatsNew = fields.whatsNew;
+
+    await client.post(`/v1/appStoreVersionLocalizations`, {
+      data: {
+        type: "appStoreVersionLocalizations",
+        attributes: versionAttrs,
+        relationships: {
+          appStoreVersion: {
+            data: { id: versionId, type: "appStoreVersions" },
+          },
+        },
+      },
+    });
+
+    // App info localization: name (appName), subtitle
+    const appInfoAttrs: Record<string, string> = { locale: storeLocale };
+    if (fields?.appName) appInfoAttrs.name = fields.appName;
+    if (fields?.subtitle) appInfoAttrs.subtitle = fields.subtitle;
+
+    const appInfoId = await this.resolveAscAppInfoId(client, ascAppId);
+    await client.post(`/v1/appInfoLocalizations`, {
+      data: {
+        type: "appInfoLocalizations",
+        attributes: appInfoAttrs,
+        relationships: {
+          appInfo: {
+            data: { id: appInfoId, type: "appInfos" },
+          },
+        },
+      },
+    });
+  }
+
+  async deleteAscLocale(app: AppRecord, canonicalLocale: string): Promise<void> {
+    const ascAppId = app.ascAppId;
+    if (!ascAppId) throw new Error("ascAppId missing");
+
+    const client = this.resolveAscClient();
+    const { versionId } = await this.resolveLatestAscVersion(client, ascAppId);
+    const storeLocale = toStoreLocale(canonicalLocale, "app_store");
+
+    const versionLocPayload = await client.get<AscLocalizationListResponse>(
+      `/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`,
+      { "fields[appStoreVersionLocalizations]": ["locale"], limit: 200 }
+    );
+    const versionLocId = versionLocPayload.data?.find(
+      (row) => row.attributes?.locale === storeLocale
+    )?.id;
+
+    const appInfoId = await this.resolveAscAppInfoId(client, ascAppId);
+    const appInfoLocPayload = await client.get<AscAppInfoLocalizationResponse>(
+      `/v1/appInfos/${appInfoId}/appInfoLocalizations`,
+      { "fields[appInfoLocalizations]": ["locale"], limit: 200 }
+    );
+    const appInfoLocId = appInfoLocPayload.data?.find(
+      (row) => row.attributes?.locale === storeLocale
+    )?.id;
+
+    const deletions: Promise<void>[] = [];
+    if (versionLocId) {
+      deletions.push(client.delete(`/v1/appStoreVersionLocalizations/${versionLocId}`));
+    }
+    if (appInfoLocId) {
+      deletions.push(client.delete(`/v1/appInfoLocalizations/${appInfoLocId}`));
+    }
+    await Promise.all(deletions);
+  }
+
+  // ---------------------------------------------------------------------------
+  // ASC field update (PATCH existing localization)
+  // ---------------------------------------------------------------------------
+
+  async updateAscLocaleFields(
+    app: AppRecord,
+    canonicalLocale: string,
+    fields: Record<string, string>
+  ): Promise<void> {
+    const ascAppId = app.ascAppId;
+    if (!ascAppId) throw new Error("ascAppId missing");
+
+    const client = this.resolveAscClient();
+    const { versionId } = await this.resolveLatestAscVersion(client, ascAppId);
+    const storeLocale = toStoreLocale(canonicalLocale, "app_store");
+
+    // Patch version localization fields
+    const versionFields: Record<string, string> = {};
+    if (fields.description !== undefined) versionFields.description = fields.description;
+    if (fields.keywords !== undefined) versionFields.keywords = fields.keywords;
+    if (fields.promotionalText !== undefined) versionFields.promotionalText = fields.promotionalText;
+    if (fields.whatsNew !== undefined) versionFields.whatsNew = fields.whatsNew;
+
+    if (Object.keys(versionFields).length > 0) {
+      const versionLocPayload = await client.get<AscLocalizationListResponse>(
+        `/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`,
+        { "fields[appStoreVersionLocalizations]": ["locale"], limit: 200 }
+      );
+      const versionLocId = versionLocPayload.data?.find(
+        (row) => row.attributes?.locale === storeLocale
+      )?.id;
+      if (versionLocId) {
+        await client.patch(`/v1/appStoreVersionLocalizations/${versionLocId}`, {
+          data: {
+            id: versionLocId,
+            type: "appStoreVersionLocalizations",
+            attributes: versionFields,
+          },
+        });
+      }
+    }
+
+    // Patch app info localization fields
+    const appInfoFields: Record<string, string> = {};
+    if (fields.appName !== undefined) appInfoFields.name = fields.appName;
+    if (fields.subtitle !== undefined) appInfoFields.subtitle = fields.subtitle;
+
+    if (Object.keys(appInfoFields).length > 0) {
+      const appInfoId = await this.resolveAscAppInfoId(client, ascAppId);
+      const appInfoLocPayload = await client.get<AscAppInfoLocalizationResponse>(
+        `/v1/appInfos/${appInfoId}/appInfoLocalizations`,
+        { "fields[appInfoLocalizations]": ["locale"], limit: 200 }
+      );
+      const appInfoLocId = appInfoLocPayload.data?.find(
+        (row) => row.attributes?.locale === storeLocale
+      )?.id;
+      if (appInfoLocId) {
+        await client.patch(`/v1/appInfoLocalizations/${appInfoLocId}`, {
+          data: {
+            id: appInfoLocId,
+            type: "appInfoLocalizations",
+            attributes: appInfoFields,
+          },
+        });
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GPC locale mutations (batched in a single edit)
+  // ---------------------------------------------------------------------------
+
+  async applyPlayStoreLocaleChanges(
+    app: AppRecord,
+    localesToAdd: Array<{ locale: string; fields: Record<string, string> }>,
+    localesToRemove: string[]
+  ): Promise<void> {
+    const packageName = app.androidPackageName;
+    if (!packageName) throw new Error("androidPackageName missing");
+
+    const client = this.resolveGpcClient();
+    const editId = await client.createEdit(packageName);
+
+    try {
+      for (const entry of localesToAdd) {
+        const gpcLocale = toStoreLocale(entry.locale, "play_store");
+        await client.put(
+          `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`,
+          {
+            language: gpcLocale,
+            title: entry.fields.title || "",
+            shortDescription: entry.fields.shortDescription || "",
+            fullDescription: entry.fields.fullDescription || "",
+          }
+        );
+      }
+
+      for (const canonicalLocale of localesToRemove) {
+        const gpcLocale = toStoreLocale(canonicalLocale, "play_store");
+        await client.delete(
+          `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`
+        );
+      }
+
+      await client.commitEdit(packageName, editId);
+    } catch (error) {
+      await client.deleteEdit(packageName, editId).catch(() => {});
+      throw error;
+    }
   }
 }

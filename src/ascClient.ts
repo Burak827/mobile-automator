@@ -115,4 +115,8 @@ export class AscClient {
   patch<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>("PATCH", path, { body });
   }
+
+  delete(path: string): Promise<void> {
+    return this.request<void>("DELETE", path);
+  }
 }

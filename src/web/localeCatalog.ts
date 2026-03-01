@@ -197,6 +197,54 @@ export const PLAY_STORE_LOCALES: string[] = [
 const APP_STORE_SET = new Set(APP_STORE_LOCALES);
 const PLAY_STORE_SET = new Set(PLAY_STORE_LOCALES);
 
+// ---------------------------------------------------------------------------
+// Cross-store locale mapping: iOS canonical → Play Store canonical
+// Only entries where the codes differ are listed; identical codes are resolved
+// automatically via PLAY_STORE_SET lookup.
+// ---------------------------------------------------------------------------
+
+const IOS_TO_PLAY_MAP: Record<string, string> = {
+  "ar-SA": "ar",
+  "cs": "cs-CZ",
+  "da": "da-DK",
+  "el": "el-GR",
+  "es-MX": "es-419",
+  "fi": "fi-FI",
+  "hi": "hi-IN",
+  "hu": "hu-HU",
+  "it": "it-IT",
+  "ja": "ja-JP",
+  "ko": "ko-KR",
+  "no": "no-NO",
+  "pl": "pl-PL",
+  "ru": "ru-RU",
+  "sv": "sv-SE",
+  "tr": "tr-TR",
+};
+
+/**
+ * Map an iOS (App Store) canonical locale to its Play Store canonical equivalent.
+ * Returns `null` if the locale has no Play Store counterpart.
+ */
+export function iosToPlayLocale(iosCanonical: string): string | null {
+  const mapped = IOS_TO_PLAY_MAP[iosCanonical] ?? iosCanonical;
+  return PLAY_STORE_SET.has(mapped) ? mapped : null;
+}
+
+// Reverse mapping: Play Store canonical → iOS canonical
+const PLAY_TO_IOS_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(IOS_TO_PLAY_MAP).map(([ios, play]) => [play, ios])
+);
+
+/**
+ * Map a Play Store canonical locale to its iOS (App Store) canonical equivalent.
+ * Returns `null` if the locale has no App Store counterpart.
+ */
+export function playToIosLocale(playCanonical: string): string | null {
+  const mapped = PLAY_TO_IOS_MAP[playCanonical] ?? playCanonical;
+  return APP_STORE_SET.has(mapped) ? mapped : null;
+}
+
 export const ALL_STORE_LOCALES: string[] = Array.from(
   new Set([...APP_STORE_LOCALES, ...PLAY_STORE_LOCALES])
 ).sort((a, b) => a.localeCompare(b));
