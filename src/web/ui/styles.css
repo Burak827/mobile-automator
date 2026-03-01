@@ -511,6 +511,33 @@ button:hover {
   line-height: 1;
 }
 
+.store-locale-add-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 34px;
+}
+
+.store-locale-add-reveal {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(-6px);
+  pointer-events: none;
+  transition: width 180ms ease, opacity 180ms ease, transform 180ms ease;
+}
+
+.store-locale-add-inline.open .store-locale-add-reveal {
+  width: clamp(140px, 22vw, 220px);
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.store-locale-add-select {
+  width: clamp(140px, 22vw, 220px);
+}
+
 .store-fields {
   display: grid;
   gap: 10px;
@@ -542,11 +569,6 @@ button:hover {
   color: var(--muted);
 }
 
-.screenshot-section {
-  margin-top: 12px;
-  min-width: 0;
-  overflow: hidden;
-}
 
 .screenshot-empty {
   font-size: 12px;
@@ -956,6 +978,14 @@ button:hover {
   .store-locale-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .store-locale-add-inline.open .store-locale-add-reveal {
+    width: 150px;
+  }
+
+  .store-locale-add-select {
+    width: 150px;
   }
 
   .button-row {

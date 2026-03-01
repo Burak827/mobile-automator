@@ -199,7 +199,13 @@ function ascTemplateUrlToReal(templateUrl: string, width: number, height: number
     .replace("{f}", "png");
 }
 
-const GPC_IMAGE_TYPES = ["phoneScreenshots"] as const;
+const GPC_IMAGE_TYPES = [
+  "phoneScreenshots",
+  "sevenInchScreenshots",
+  "tenInchScreenshots",
+  "wearScreenshots",
+  "tvScreenshots",
+] as const;
 
 type GpcListingsListResponse = {
   listings?: Array<{

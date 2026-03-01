@@ -9,7 +9,6 @@ import type {
   PendingValueMap,
   PlayStoreLocaleDetail,
   PlayStorePanelState,
-  ScreenshotGroup,
   ScreenshotImage,
   StoreFieldChangePayload,
   StoreFieldRule,
@@ -137,6 +136,8 @@ function StoreFieldList({
   const keys: readonly StoreFieldKey[] =
     store === 'app_store' ? IOS_FIELD_ORDER : PLAY_FIELD_ORDER;
   const values = readStoreFieldValues(store, detail);
+  const screenshots = detail?.screenshots;
+  const [preview, setPreview] = useState<ScreenshotImage | null>(null);
 
   return (
     <div className="store-fields">
@@ -193,41 +194,31 @@ function StoreFieldList({
           </label>
         );
       })}
-    </div>
-  );
-}
 
-type ScreenshotFieldProps = {
-  screenshots?: ScreenshotGroup[];
-};
-
-function ScreenshotField({ screenshots }: ScreenshotFieldProps) {
-  const [preview, setPreview] = useState<ScreenshotImage | null>(null);
-
-  if (!screenshots || screenshots.length === 0) return null;
-
-  return (
-    <div className="store-field screenshot-section">
-      <span>Screenshots</span>
-      {screenshots.map((group) => (
-        <div key={group.displayType}>
-          <div className="screenshot-group-label">{group.displayType}</div>
-          <div className="screenshot-grid">
-            {group.images.map((img, i) => (
-              <img
-                key={i}
-                className="screenshot-thumb"
-                src={img.url}
-                width={img.width && img.height ? Math.round((img.width / img.height) * 100) : undefined}
-                height={100}
-                loading="lazy"
-                alt={`${group.displayType} #${i + 1}`}
-                onClick={() => setPreview(img)}
-              />
-            ))}
-          </div>
+      {screenshots && screenshots.length > 0 ? (
+        <div className="store-field">
+          <span>Screenshots</span>
+          {screenshots.map((group) => (
+            <div key={group.displayType}>
+              <div className="screenshot-group-label">{group.displayType}</div>
+              <div className="screenshot-grid">
+                {group.images.map((img, i) => (
+                  <img
+                    key={i}
+                    className="screenshot-thumb"
+                    src={img.url}
+                    width={img.width && img.height ? Math.round((img.width / img.height) * 100) : undefined}
+                    height={100}
+                    loading="lazy"
+                    alt={`${group.displayType} #${i + 1}`}
+                    onClick={() => setPreview(img)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
 
       {preview ? (
         <dialog className="screenshot-dialog" open onClick={() => setPreview(null)}>
@@ -283,25 +274,46 @@ function StoreLocalePanel({
   onAddLocale,
   onChangeField,
 }: StoreLocalePanelProps) {
-  const hasLocales = locales.length > 0;
-  const fallbackLocale = (sourceLocale || '').trim() || 'en-US';
-  const selectOptions = hasLocales ? locales : [fallbackLocale];
-  const selectedValue = selectOptions.includes(selectedLocale)
-    ? selectedLocale
-    : selectOptions[0] || '';
-  const addableLocales = useMemo(
+  const supportedLocales = useMemo(
     () =>
       localeCatalog
         .filter((entry) => (store === 'app_store' ? entry.iosSupported : entry.androidSupported))
         .map((entry) => entry.locale)
-        .filter((locale) => !selectOptions.includes(locale)),
-    [localeCatalog, selectOptions, store]
+        .sort((a, b) => a.localeCompare(b)),
+    [localeCatalog, store]
   );
+  const existingLocales = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          locales
+            .map((locale) => locale.trim())
+            .filter((locale) => locale.length > 0)
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [locales]
+  );
+  const hasLocales = existingLocales.length > 0;
+  const selectedValue = existingLocales.includes(selectedLocale)
+    ? selectedLocale
+    : existingLocales[0] || '';
+  const addableLocales = useMemo(
+    () => {
+      const existingSet = new Set(existingLocales);
+      return supportedLocales.filter((locale) => !existingSet.has(locale));
+    },
+    [existingLocales, supportedLocales]
+  );
+  const [isAddOpen, setIsAddOpen] = useState(false);
   const [addLocaleValue, setAddLocaleValue] = useState('');
 
   useEffect(() => {
-    const first = addableLocales[0] || '';
-    setAddLocaleValue((prev) => (prev && addableLocales.includes(prev) ? prev : first));
+    if (addableLocales.length === 0) {
+      setIsAddOpen(false);
+      setAddLocaleValue('');
+      return;
+    }
+    setAddLocaleValue((prev) => (prev && addableLocales.includes(prev) ? prev : ''));
   }, [addableLocales]);
 
   const versionString =
@@ -325,7 +337,9 @@ function StoreLocalePanel({
               <SourceLocaleSelect
                 name={`${store}-locale`}
                 value={selectedValue}
-                options={selectOptions}
+                options={existingLocales}
+                disabled={!hasLocales}
+                placeholder={hasLocales ? undefined : 'Locale yok'}
                 required={false}
                 onChange={onChangeLocale}
               />
@@ -340,62 +354,58 @@ function StoreLocalePanel({
             >
               X
             </Button>
-          </div>
-        </div>
-
-        <div className="store-locale-row">
-          <span className="store-locale-label">Locale Ekle</span>
-          <div className="store-locale-actions">
-            <div className="store-locale-select">
-              <SourceLocaleSelect
-                name={`${store}-locale-add`}
-                value={addLocaleValue}
-                options={addableLocales.length > 0 ? addableLocales : ['']}
+            <div className={`store-locale-add-inline ${isAddOpen ? 'open' : 'closed'}`}>
+              <Button
+                type="button"
+                variant="primary"
+                className="store-locale-add-btn"
                 disabled={addableLocales.length === 0}
-                required={false}
-                onChange={setAddLocaleValue}
-              />
+                title={isAddOpen ? 'Locale eklemeyi kapat' : 'Locale ekle'}
+                onClick={() => setIsAddOpen((prev) => !prev)}
+              >
+                +
+              </Button>
+              <div className="store-locale-add-reveal">
+                <div className="store-locale-add-select">
+                  <SourceLocaleSelect
+                    name={`${store}-locale-add`}
+                    value={addLocaleValue}
+                    options={addableLocales}
+                    disabled={addableLocales.length === 0}
+                    required={false}
+                    placeholder="Locale seç"
+                    onChange={(nextLocale) => {
+                      setAddLocaleValue(nextLocale);
+                      if (!nextLocale) return;
+                      onAddLocale(nextLocale);
+                      setAddLocaleValue('');
+                      setIsAddOpen(false);
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-            <Button
-              type="button"
-              variant="primary"
-              className="store-locale-add-btn"
-              disabled={addableLocales.length === 0 || !addLocaleValue}
-              title={addLocaleValue ? `${addLocaleValue} ekle` : 'Ekle'}
-              onClick={() => {
-                if (!addLocaleValue) return;
-                onAddLocale(addLocaleValue);
-              }}
-            >
-              +
-            </Button>
           </div>
         </div>
 
         {!hasLocales ? <p>Bu store için sync edilmiş locale bulunamadı.</p> : null}
 
-        {storeRule?.screenshotRule ? (
-          <p className="store-requirement-note">
-            Screenshot: {storeRule.screenshotRule.requiredForPublish ? 'publish için zorunlu' : 'opsiyonel'} | minimum {storeRule.screenshotRule.minCount}
-          </p>
-        ) : null}
       </div>
 
       <div className="store-panel-body">
         {isLoading ? (
           <p>Locale detayı yükleniyor...</p>
+        ) : !hasLocales || !selectedValue ? (
+          <p>Bu store için düzenlenebilir locale yok. `+` ile locale ekleyebilirsin.</p>
         ) : (
-          <>
-            <StoreFieldList
-              store={store}
-              locale={selectedValue}
-              detail={detail}
-              fieldRules={storeRule?.fields}
-              pendingValueMap={pendingValueMap}
-              onChangeField={onChangeField}
-            />
-            <ScreenshotField screenshots={detail?.screenshots} />
-          </>
+          <StoreFieldList
+            store={store}
+            locale={selectedValue}
+            detail={detail}
+            fieldRules={storeRule?.fields}
+            pendingValueMap={pendingValueMap}
+            onChangeField={onChangeField}
+          />
         )}
       </div>
     </article>

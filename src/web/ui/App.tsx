@@ -585,6 +585,18 @@ export default function App() {
       const targetLocale = locale.trim();
       if (!targetLocale) return;
 
+      const isSupportedForStore = localeCatalog.some(
+        (entry) =>
+          entry.locale === targetLocale &&
+          (store === 'app_store' ? entry.iosSupported : entry.androidSupported)
+      );
+      if (action === 'add' && !isSupportedForStore) {
+        pushStatus(
+          `${store === 'app_store' ? 'iOS' : 'Play Store'} için desteklenmeyen locale: ${targetLocale}`
+        );
+        return;
+      }
+
       const baselineLocales = store === 'app_store' ? iosLocales : playLocales;
       const existsInBaseline = baselineLocales.includes(targetLocale);
       const localeChangeKey = toStoreLocaleChangeKey(store, targetLocale);
@@ -635,7 +647,7 @@ export default function App() {
         return next;
       });
     },
-    [iosLocales, playLocales]
+    [iosLocales, localeCatalog, playLocales, pushStatus]
   );
 
   useEffect(() => {
@@ -795,7 +807,7 @@ export default function App() {
             <StoreLocalePanels
               sourceLocale={appConfig.sourceLocale}
               storeRules={meta?.storeRules}
-              localeCatalog={localeOptions}
+              localeCatalog={localeCatalog}
               pendingValueMap={pendingValueMap}
               ios={{
                 locales: effectiveIosLocales,
