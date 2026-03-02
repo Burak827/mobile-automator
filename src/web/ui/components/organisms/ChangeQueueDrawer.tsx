@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Button from '../atoms/Button';
 import type { PendingStoreChange, StoreId } from '../../types';
 
@@ -24,6 +25,8 @@ type Props = {
   changes: PendingStoreChange[];
   onToggle: () => void;
   onClear: () => void;
+  onExport: () => void;
+  onImport: (text: string) => void;
   onApplyStore?: (store: StoreId) => void;
   onApply: () => void;
 };
@@ -34,9 +37,13 @@ export default function ChangeQueueDrawer({
   changes,
   onToggle,
   onClear,
+  onExport,
+  onImport,
   onApplyStore,
   onApply,
 }: Props) {
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importText, setImportText] = useState('');
   const count = Array.isArray(changes) ? changes.length : 0;
   const iosCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'app_store').length : 0;
   const playCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'play_store').length : 0;
@@ -49,7 +56,14 @@ export default function ChangeQueueDrawer({
         className={`changes-drawer-toggle ${isOpen ? 'open' : ''}`}
         onClick={onToggle}
       >
-        {isOpen ? '>' : '<'} {count}
+        <svg className="drawer-toggle-icon" width="10" height="16" viewBox="0 0 10 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {isOpen ? (
+            <polyline points="2,2 8,8 2,14" />
+          ) : (
+            <polyline points="8,2 2,8 8,14" />
+          )}
+        </svg>
+        <span className="drawer-toggle-count">{count}</span>
       </button>
 
       <aside className={drawerClass}>
@@ -88,18 +102,49 @@ export default function ChangeQueueDrawer({
         </div>
 
         <div className="changes-drawer-actions">
-          <Button type="button" variant="ghost" onClick={onClear} disabled={count === 0 || isBusy}>
-            Temizle
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('app_store')} disabled={iosCount === 0 || isBusy}>
-            {isBusy ? 'İşleniyor...' : `iOS Güncelle (${iosCount})`}
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => onApplyStore?.('play_store')} disabled={playCount === 0 || isBusy}>
-            {isBusy ? 'İşleniyor...' : `Play Güncelle (${playCount})`}
-          </Button>
-          <Button type="button" variant="primary" onClick={onApply} disabled={count === 0 || isBusy}>
-            {isBusy ? 'İşleniyor...' : 'Güncelle'}
-          </Button>
+          <div className="changes-drawer-actions-row">
+            <Button type="button" variant="ghost" onClick={onExport} disabled={count === 0 || isBusy}>
+              Export
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setIsImportOpen((prev) => !prev)} disabled={isBusy}>
+              {isImportOpen ? 'Import Kapat' : 'Import Aç'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={onClear} disabled={count === 0 || isBusy}>
+              Temizle
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => onApplyStore?.('app_store')} disabled={iosCount === 0 || isBusy}>
+              {isBusy ? 'İşleniyor...' : `iOS Güncelle (${iosCount})`}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => onApplyStore?.('play_store')} disabled={playCount === 0 || isBusy}>
+              {isBusy ? 'İşleniyor...' : `Play Güncelle (${playCount})`}
+            </Button>
+            <Button type="button" variant="primary" onClick={onApply} disabled={count === 0 || isBusy}>
+              {isBusy ? 'İşleniyor...' : 'Güncelle'}
+            </Button>
+          </div>
+
+          {isImportOpen ? (
+            <div className="changes-drawer-import">
+              <label>
+                JSON
+                <textarea
+                  className="changes-drawer-import-textarea"
+                  value={importText}
+                  onChange={(event) => setImportText(event.target.value)}
+                  placeholder='{"changes":[{"kind":"locale","store":"app_store","locale":"fr","action":"add"}]}'
+                  disabled={isBusy}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={isBusy || importText.trim().length === 0}
+                onClick={() => onImport(importText)}
+              >
+                İçe Aktar
+              </Button>
+            </div>
+          ) : null}
         </div>
       </aside>
     </>

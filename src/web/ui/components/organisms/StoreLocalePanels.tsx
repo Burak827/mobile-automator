@@ -122,6 +122,7 @@ type StoreFieldListProps = {
   detail: StoreLocaleDetail | null;
   fieldRules?: Record<string, StoreFieldRule>;
   pendingValueMap: PendingValueMap;
+  showHints: boolean;
   onChangeField: (payload: StoreFieldChangePayload) => void;
 };
 
@@ -131,6 +132,7 @@ function StoreFieldList({
   detail,
   fieldRules,
   pendingValueMap,
+  showHints,
   onChangeField,
 }: StoreFieldListProps) {
   const keys: readonly StoreFieldKey[] =
@@ -138,17 +140,9 @@ function StoreFieldList({
   const values = readStoreFieldValues(store, detail);
   const screenshots = detail?.screenshots;
   const [preview, setPreview] = useState<ScreenshotImage | null>(null);
-  const [showHints, setShowHints] = useState(false);
 
   return (
     <div className={`store-fields ${showHints ? 'show-hints' : ''}`}>
-      <button
-        type="button"
-        className="hints-toggle-btn"
-        onClick={() => setShowHints((prev) => !prev)}
-      >
-        {showHints ? 'Kuralları Gizle' : 'Kuralları Göster'}
-      </button>
       {keys.map((fieldKey) => {
         const baseValue = values[fieldKey] || '';
         const changeKey = toChangeKey(store, locale, fieldKey);
@@ -314,6 +308,7 @@ function StoreLocalePanel({
   );
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addLocaleValue, setAddLocaleValue] = useState('');
+  const [showHints, setShowHints] = useState(false);
 
   useEffect(() => {
     if (addableLocales.length === 0) {
@@ -393,6 +388,15 @@ function StoreLocalePanel({
                 </div>
               </div>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              className="hints-toggle-btn"
+              title="Alan kural detaylarını göster/gizle"
+              onClick={() => setShowHints((prev) => !prev)}
+            >
+              {showHints ? 'Kuralları Gizle' : 'Kuralları Göster'}
+            </Button>
           </div>
         </div>
 
@@ -412,6 +416,7 @@ function StoreLocalePanel({
             detail={detail}
             fieldRules={storeRule?.fields}
             pendingValueMap={pendingValueMap}
+            showHints={showHints}
             onChangeField={onChangeField}
           />
         )}

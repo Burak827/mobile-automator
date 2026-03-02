@@ -15,7 +15,7 @@ export const LOCALE_ALIASES: Record<string, string> = {
   "iw-IL": "he",       // Hebrew  (Android legacy Java code)
   "zh-CN": "zh-Hans",  // Chinese Simplified (Android region code)
   "zh-TW": "zh-Hant",  // Chinese Traditional (Android region code)
-  "ms-MY": "ms",       // Malay (Android adds region)
+  "zu-ZA": "zu",       // Zulu  (may appear with region in some Play payloads)
 };
 
 /** Canonical locale → iOS (App Store Connect) code */
@@ -31,7 +31,6 @@ const CANONICAL_TO_ANDROID: Record<string, string> = {
   "he": "iw-IL",
   "zh-Hans": "zh-CN",
   "zh-Hant": "zh-TW",
-  "ms": "ms-MY",
 };
 
 /**
@@ -104,7 +103,7 @@ export const APP_STORE_LOCALES: string[] = [
 
 
 // Source: Google Play Console Help - "App language support".
-// Codes that have a canonical alias (iw-IL, zh-CN, zh-TW, ms-MY) are
+// Codes that have a canonical alias (iw-IL, zh-CN, zh-TW) are
 // replaced with their canonical equivalents in this list.
 export const PLAY_STORE_LOCALES: string[] = [
   "af",
@@ -159,7 +158,8 @@ export const PLAY_STORE_LOCALES: string[] = [
   "lv",
   "lt",
   "mk-MK",
-  "ms",        // canonical for ms-MY
+  "ms",
+  "ms-MY",
   "ml-IN",
   "mr-IN",
   "mn-MN",
@@ -192,6 +192,7 @@ export const PLAY_STORE_LOCALES: string[] = [
   "uk",
   "ur",
   "vi",
+  "zu",
 ];
 
 const APP_STORE_SET = new Set(APP_STORE_LOCALES);
@@ -235,6 +236,7 @@ export function iosToPlayLocale(iosCanonical: string): string | null {
 const PLAY_TO_IOS_MAP: Record<string, string> = Object.fromEntries(
   Object.entries(IOS_TO_PLAY_MAP).map(([ios, play]) => [play, ios])
 );
+PLAY_TO_IOS_MAP["ms-MY"] = "ms";
 
 /**
  * Map a Play Store canonical locale to its iOS (App Store) canonical equivalent.

@@ -901,29 +901,39 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
       }
     }
 
-    // GPC — each locale independently (one edit per locale for resilience)
+    // GPC — apply all locale mutations in a single edit to avoid
+    // hitting "Daily edit creation quota exceeded" on large batches.
     if (gpcChanges.length > 0) {
-      const results = await Promise.allSettled(
-        gpcChanges.map(async (change) => {
-          if (change.action === "add" || change.action === "update") {
-            await storeApi.applyPlayStoreSingleLocale(appRow, change.locale, change.fields ?? {});
-          } else {
-            await storeApi.deletePlayStoreSingleLocale(appRow, change.locale);
-          }
-        })
-      );
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const change = gpcChanges[i];
-        if (result.status === "fulfilled") {
-          succeeded.push(change);
-        } else {
+      const upsertByLocale = new Map<string, Record<string, string>>();
+      const removeLocaleSet = new Set<string>();
+
+      for (const change of gpcChanges) {
+        if (change.action === "remove") {
+          removeLocaleSet.add(change.locale);
+          upsertByLocale.delete(change.locale);
+          continue;
+        }
+        removeLocaleSet.delete(change.locale);
+        upsertByLocale.set(change.locale, change.fields ?? {});
+      }
+
+      const localesToAdd = Array.from(upsertByLocale.entries()).map(([locale, fields]) => ({
+        locale,
+        fields,
+      }));
+      const localesToRemove = Array.from(removeLocaleSet.values());
+
+      try {
+        if (localesToAdd.length > 0 || localesToRemove.length > 0) {
+          await storeApi.applyPlayStoreLocaleChanges(appRow, localesToAdd, localesToRemove);
+        }
+        succeeded.push(...gpcChanges);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        for (const change of gpcChanges) {
           failed.push({
             ...change,
-            error:
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason),
+            error: errorMessage,
           });
         }
       }
@@ -1492,6 +1502,10 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
       ? (body.locales as unknown[]).filter((l): l is string => typeof l === "string")
       : null;
     const masterPrompt = typeof body.masterPrompt === "string" ? body.masterPrompt.trim() : "";
+    const mode = body.mode === "update_existing" ? "update_existing" : "generate_missing";
+    const requestedFields = Array.isArray(body.fields)
+      ? (body.fields as unknown[]).filter((f): f is string => typeof f === "string")
+      : null;
 
     const openaiApiKey = env.openaiApiKey;
     const openaiModel = env.openaiModel ?? "gpt-4o-mini";
@@ -1516,24 +1530,6 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
     }
     const sourceDetail = JSON.parse(sourceDetailRow.detailJson) as Record<string, unknown>;
 
-    // Target locales: all supported locales for this store that don't have detail in DB yet
-    const allSupportedLocales = store === "app_store" ? APP_STORE_LOCALES : PLAY_STORE_LOCALES;
-    let targetLocales = allSupportedLocales
-      .filter((l) => l !== sourceLocale)
-      .filter((l) => !repo.getStoreLocaleDetail(appId, store, l))
-      .sort((a, b) => a.localeCompare(b));
-
-    // If client specified locales, intersect with available set
-    if (requestedLocales && requestedLocales.length > 0) {
-      const requestedSet = new Set(requestedLocales);
-      targetLocales = targetLocales.filter((l) => requestedSet.has(l));
-    }
-
-    if (targetLocales.length === 0) {
-      res.status(400).json({ error: "No target locales to translate." });
-      return;
-    }
-
     // Get translatable fields and source values
     const translatableFields = getTranslatableFields(store);
     const sourceTexts = new Map<string, string>();
@@ -1549,14 +1545,54 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
       return;
     }
 
-    // Determine which fields each locale is missing
+    // Determine target locales based on mode
+    let targetLocales: string[];
+
+    if (mode === "update_existing") {
+      // Update existing: target = locales already in DB (excluding source)
+      const existingRows = repo.listStoreLocales(appId).filter((r) => r.store === store);
+      targetLocales = existingRows
+        .map((r) => r.locale)
+        .filter((l) => l !== sourceLocale)
+        .sort((a, b) => a.localeCompare(b));
+    } else {
+      // Generate missing: target = all supported locales (excluding source).
+      // Existing locales are included here too; below we only process fields
+      // that are actually missing, so fully populated locales are skipped.
+      const allSupportedLocales = store === "app_store" ? APP_STORE_LOCALES : PLAY_STORE_LOCALES;
+      targetLocales = allSupportedLocales
+        .filter((l) => l !== sourceLocale)
+        .sort((a, b) => a.localeCompare(b));
+    }
+
+    // If client specified locales, intersect with available set
+    if (requestedLocales && requestedLocales.length > 0) {
+      const requestedSet = new Set(requestedLocales);
+      targetLocales = targetLocales.filter((l) => requestedSet.has(l));
+    }
+
+    if (targetLocales.length === 0) {
+      res.status(400).json({ error: "No target locales to translate." });
+      return;
+    }
+
+    // Filter fields if client specified which ones to translate
+    const activeFields = requestedFields && requestedFields.length > 0
+      ? translatableFields.filter((tf) => requestedFields.includes(tf.fieldId) && sourceTexts.has(tf.fieldId))
+      : translatableFields.filter((tf) => sourceTexts.has(tf.fieldId));
+
+    if (activeFields.length === 0) {
+      res.status(400).json({ error: "No translatable fields selected." });
+      return;
+    }
+
     const titleFieldId = store === "app_store" ? "appName" : "title";
-    const otherFields = translatableFields.filter((tf) => tf.fieldId !== titleFieldId);
-    const titleField = translatableFields.find((tf) => tf.fieldId === titleFieldId);
+    const otherFields = activeFields.filter((tf) => tf.fieldId !== titleFieldId);
+    const titleField = activeFields.find((tf) => tf.fieldId === titleFieldId);
 
     type LocaleWork = {
       locale: string;
-      missingFields: string[];         // fieldIds that need translation
+      workFields: string[];
       targetDetail: Record<string, unknown> | null;
     };
 
@@ -1567,20 +1603,24 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
         ? (JSON.parse(targetDetailRow.detailJson) as Record<string, unknown>)
         : null;
 
-      // Only include fields that have source text but no target value
-      const missingFields: string[] = [];
-      for (const tf of translatableFields) {
-        if (!sourceTexts.has(tf.fieldId)) continue;
-        const existingValue = targetDetail
-          ? extractFieldValue(targetDetail, store, tf.fieldId).trim()
-          : "";
-        if (!existingValue) {
-          missingFields.push(tf.fieldId);
+      if (mode === "update_existing") {
+        // Override mode: translate all requested fields regardless of existing value
+        const workFields = activeFields.map((tf) => tf.fieldId);
+        localeWorkList.push({ locale: targetLocale, workFields, targetDetail });
+      } else {
+        // Generate missing: only fields that are empty in target
+        const workFields: string[] = [];
+        for (const tf of activeFields) {
+          const existingValue = targetDetail
+            ? extractFieldValue(targetDetail, store, tf.fieldId).trim()
+            : "";
+          if (!existingValue) {
+            workFields.push(tf.fieldId);
+          }
         }
-      }
-
-      if (missingFields.length > 0) {
-        localeWorkList.push({ locale: targetLocale, missingFields, targetDetail });
+        if (workFields.length > 0) {
+          localeWorkList.push({ locale: targetLocale, workFields, targetDetail });
+        }
       }
     }
 
@@ -1676,7 +1716,7 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
     const translatedTitles = new Map<string, string>(); // locale -> translated title
 
     if (titleField && sourceTexts.has(titleFieldId)) {
-      const localesNeedingTitle = localeWorkList.filter((lw) => lw.missingFields.includes(titleFieldId));
+      const localesNeedingTitle = localeWorkList.filter((lw) => lw.workFields.includes(titleFieldId));
       for (const lw of localesNeedingTitle) {
         try {
           const result = await translateField(titleField, lw.locale);
@@ -1714,7 +1754,7 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
         translatedTitles.get(lw.locale) ?? (existingTitle || undefined);
 
       // Translate other missing fields
-      const remainingFields = lw.missingFields.filter((fid) => fid !== titleFieldId);
+      const remainingFields = lw.workFields.filter((fid) => fid !== titleFieldId);
       let skippedLocale = false;
 
       for (const fieldId of remainingFields) {

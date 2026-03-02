@@ -5,8 +5,10 @@ import AppDetailsPanel from './components/organisms/AppDetailsPanel';
 import AppListSidebar from './components/organisms/AppListSidebar';
 import ChangeQueueDrawer from './components/organisms/ChangeQueueDrawer';
 import CreateAppDialog from './components/organisms/CreateAppDialog';
+import FieldUpdaterDialog from './components/organisms/FieldUpdaterDialog';
 import GenerateTranslationsDialog from './components/organisms/GenerateTranslationsDialog';
 import HeaderBar from './components/organisms/HeaderBar';
+import RnLocalesDialog from './components/organisms/RnLocalesDialog';
 import RulesDialog from './components/organisms/RulesDialog';
 import StoreLocalePanels from './components/organisms/StoreLocalePanels';
 import { api, formatOutput } from './lib/api';
@@ -25,6 +27,7 @@ import type {
   PendingValueMap,
   PlayStoreLocaleDetail,
   StoreId,
+  StoreLocaleDetailsListPayload,
   StoreLocaleDetailPayload,
   StoreLocalesPayload,
   StoreRuleSet,
@@ -60,20 +63,22 @@ type AppResponse = {
   app: AppRecord;
 };
 
-type AppleCfBundleListResponse = {
-  appId: number;
-  sourceLocale: string;
-  generatedAt: string;
-  localeCount: number;
-  unsupportedInCatalog: string[];
-  locales: Record<
+type RnLocalePayload = {
+  locales?: Record<
     string,
     {
-      app_name: string;
-      CFBundleDisplayName: string;
-      CFBundleName: string;
+      app_name?: unknown;
+      CFBundleDisplayName?: unknown;
+      CFBundleName?: unknown;
     }
   >;
+};
+
+type ChangeQueuePayload = {
+  version?: number;
+  appId?: number;
+  exportedAt?: string;
+  changes?: unknown[];
 };
 
 function normalizeLocaleCatalog(rows: unknown): LocaleCatalogEntry[] {
@@ -180,6 +185,277 @@ function asPlayStoreDetail(detail: unknown): PlayStoreLocaleDetail | null {
   return store === 'play_store' ? (detail as PlayStoreLocaleDetail) : null;
 }
 
+function readStoreTitleFromDetail(store: StoreId, detail: unknown): string {
+  if (store === 'app_store') {
+    const appStoreDetail = asAppStoreDetail(detail);
+    return appStoreDetail?.appInfo?.name?.trim() || '';
+  }
+
+  const playStoreDetail = asPlayStoreDetail(detail);
+  return playStoreDetail?.listing?.title?.trim() || '';
+}
+
+function readImportedRnLocaleName(value: unknown): string {
+  if (!value || typeof value !== 'object') return '';
+
+  const entry = value as {
+    app_name?: unknown;
+    CFBundleDisplayName?: unknown;
+    CFBundleName?: unknown;
+  };
+  const candidates = [entry.app_name, entry.CFBundleDisplayName, entry.CFBundleName];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const normalized = candidate.trim();
+    if (normalized) return normalized;
+  }
+
+  return '';
+}
+
+function normalizeImportedLocaleToken(locale: string): string {
+  return locale.trim().replace(/_/g, '-');
+}
+
+function firstLocaleSegment(locale: string): string {
+  const [segment = ''] = locale.split('-');
+  return segment.toLowerCase();
+}
+
+function findLocaleCaseInsensitive(locales: Set<string>, target: string): string | null {
+  const lowerTarget = target.toLowerCase();
+  for (const locale of locales) {
+    if (locale.toLowerCase() === lowerTarget) return locale;
+  }
+  return null;
+}
+
+function resolveImportedLocaleForStore(
+  rawLocale: string,
+  existingLocales: Set<string>,
+  supportedLocales: Set<string>
+): string {
+  const normalized = normalizeImportedLocaleToken(rawLocale);
+  if (!normalized) return '';
+
+  const exactExisting = findLocaleCaseInsensitive(existingLocales, normalized);
+  if (exactExisting) return exactExisting;
+
+  const exactSupported = findLocaleCaseInsensitive(supportedLocales, normalized);
+  if (exactSupported) return exactSupported;
+
+  const targetLang = firstLocaleSegment(normalized);
+  const existingLangMatches = Array.from(existingLocales).filter(
+    (locale) => firstLocaleSegment(locale) === targetLang
+  );
+  if (existingLangMatches.length === 1) return existingLangMatches[0];
+
+  const supportedLangMatches = Array.from(supportedLocales).filter(
+    (locale) => firstLocaleSegment(locale) === targetLang
+  );
+  if (supportedLangMatches.length === 1) return supportedLangMatches[0];
+
+  return normalized;
+}
+
+function parseRnLocalePayloadFromText(rawText: string): RnLocalePayload {
+  const removeBOM = rawText.replace(/^\uFEFF/, '').trim();
+  if (!removeBOM) {
+    throw new Error('Import metni boş.');
+  }
+
+  const fenceMatch = removeBOM.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const stripped = (fenceMatch?.[1] ?? removeBOM).trim();
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (value: string) => {
+    const next = value.trim();
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    candidates.push(next);
+  };
+
+  addCandidate(stripped);
+  addCandidate(stripped.replace(/;\s*$/, ''));
+
+  if (!stripped.startsWith('{') && /"locales"\s*:/.test(stripped)) {
+    addCandidate(`{${stripped}}`);
+  }
+
+  const firstBrace = stripped.indexOf('{');
+  const lastBrace = stripped.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    addCandidate(stripped.slice(firstBrace, lastBrace + 1));
+  }
+
+  let lastParseError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as RnLocalePayload;
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (!parsed.locales || typeof parsed.locales !== 'object') {
+        throw new Error('`locales` alanı bulunamadı.');
+      }
+      return parsed;
+    } catch (error) {
+      lastParseError = error;
+    }
+  }
+
+  throw lastParseError instanceof Error
+    ? lastParseError
+    : new Error('Import JSON parse edilemedi.');
+}
+
+function parseChangeQueuePayloadFromText(rawText: string): PendingStoreChangeMap {
+  const removeBOM = rawText.replace(/^\uFEFF/, '').trim();
+  if (!removeBOM) {
+    throw new Error('Import metni boş.');
+  }
+
+  const fenceMatch = removeBOM.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const stripped = (fenceMatch?.[1] ?? removeBOM).trim();
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (value: string) => {
+    const next = value.trim();
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    candidates.push(next);
+  };
+
+  addCandidate(stripped);
+  addCandidate(stripped.replace(/;\s*$/, ''));
+
+  if (!stripped.startsWith('{') && /"changes"\s*:/.test(stripped)) {
+    addCandidate(`{${stripped}}`);
+  }
+
+  const firstBrace = stripped.indexOf('{');
+  const lastBrace = stripped.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    addCandidate(stripped.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = stripped.indexOf('[');
+  const lastBracket = stripped.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    addCandidate(stripped.slice(firstBracket, lastBracket + 1));
+  }
+
+  let rawChanges: unknown[] | null = null;
+  let lastParseError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (Array.isArray(parsed)) {
+        rawChanges = parsed;
+        break;
+      }
+      if (parsed && typeof parsed === 'object') {
+        const payload = parsed as ChangeQueuePayload;
+        if (Array.isArray(payload.changes)) {
+          rawChanges = payload.changes;
+          break;
+        }
+      }
+    } catch (error) {
+      lastParseError = error;
+    }
+  }
+
+  if (!rawChanges) {
+    throw lastParseError instanceof Error
+      ? lastParseError
+      : new Error('Import içinde geçerli `changes` listesi bulunamadı.');
+  }
+
+  const map: PendingStoreChangeMap = {};
+
+  for (const item of rawChanges) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const store = row.store === 'app_store' || row.store === 'play_store' ? row.store : null;
+    const locale = typeof row.locale === 'string' ? row.locale.trim() : '';
+    const action =
+      row.action === 'add' || row.action === 'remove' || row.action === 'update'
+        ? row.action
+        : null;
+    const kind = typeof row.kind === 'string' ? row.kind.trim() : '';
+    if (!store || !locale) continue;
+
+    if (kind === 'locale' || action === 'add' || action === 'remove') {
+      if (action === 'add' || action === 'remove') {
+        const key = toStoreLocaleChangeKey(store, locale);
+        map[key] = {
+          kind: 'locale',
+          key,
+          store,
+          locale,
+          action,
+        };
+      }
+    }
+
+    const field =
+      typeof row.field === 'string' && row.field.trim().length > 0
+        ? row.field.trim()
+        : '';
+    if (kind === 'field' || field) {
+      if (!field) continue;
+      const oldValue = typeof row.oldValue === 'string' ? row.oldValue : '';
+      const nextValueRaw = row.newValue;
+      const newValue =
+        typeof nextValueRaw === 'string'
+          ? nextValueRaw
+          : nextValueRaw === undefined || nextValueRaw === null
+            ? ''
+            : String(nextValueRaw);
+      const key = toStoreChangeKey(store, locale, field);
+      map[key] = {
+        kind: 'field',
+        key,
+        store,
+        locale,
+        field,
+        oldValue,
+        newValue,
+      };
+      continue;
+    }
+
+    if ((action === 'add' || action === 'update') && row.fields && typeof row.fields === 'object') {
+      const fields = row.fields as Record<string, unknown>;
+      for (const [fieldNameRaw, valueRaw] of Object.entries(fields)) {
+        const fieldName = fieldNameRaw.trim();
+        if (!fieldName) continue;
+        const newValue =
+          typeof valueRaw === 'string'
+            ? valueRaw
+            : valueRaw === undefined || valueRaw === null
+              ? ''
+              : String(valueRaw);
+        const key = toStoreChangeKey(store, locale, fieldName);
+        map[key] = {
+          kind: 'field',
+          key,
+          store,
+          locale,
+          field: fieldName,
+          oldValue: '',
+          newValue,
+        };
+      }
+    }
+  }
+
+  return map;
+}
+
 type StoreDiffField = { field: string; newValue: string; oldValue: string };
 
 type StoreDiffEntry = {
@@ -243,6 +519,9 @@ export default function App() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
   const [generateModalStore, setGenerateModalStore] = useState<StoreId | null>(null);
+  const [isFieldUpdaterOpen, setIsFieldUpdaterOpen] = useState(false);
+  const [isRnLocalesOpen, setIsRnLocalesOpen] = useState(false);
+  const [rnLocalesStore, setRnLocalesStore] = useState<StoreId>('app_store');
 
   const [createForm, setCreateForm] = useState<AppConfigForm>(EMPTY_CREATE_FORM);
   const [appConfig, setAppConfig] = useState<AppConfigForm>(EMPTY_APP_CONFIG);
@@ -747,20 +1026,42 @@ export default function App() {
   }, [populateQueueFromDiff, pushStatus, selectedAppId]);
 
   const handleGenerateTranslations = useCallback(
-    async (store: StoreId, locales: string[], masterPrompt: string) => {
+    async (
+      store: StoreId,
+      locales: string[],
+      masterPrompt: string,
+      mode?: 'generate_missing' | 'update_existing',
+      fields?: string[],
+    ) => {
       if (!selectedAppId) return;
 
       const storeName = store === 'app_store' ? 'App Store' : 'Play Store';
+      const isUpdate = mode === 'update_existing';
       setIsApplyingConfig(true);
-      pushStatus(`✨ ${storeName} çevirileri oluşturuluyor (${locales.length} locale)...`);
+      pushStatus(
+        isUpdate
+          ? `🔄 ${storeName} field güncelleniyor (${fields?.length ?? 0} field)...`
+          : `✨ ${storeName} çevirileri oluşturuluyor (${locales.length} locale)...`
+      );
 
       try {
+        const fetchBody: Record<string, unknown> = {
+          store,
+          masterPrompt: masterPrompt || undefined,
+        };
+        if (isUpdate) {
+          fetchBody.mode = 'update_existing';
+          fetchBody.fields = fields;
+        } else {
+          fetchBody.locales = locales;
+        }
+
         const response = await fetch(
           `/api/apps/${selectedAppId}/generate-translations?store=${encodeURIComponent(store)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ store, locales, masterPrompt: masterPrompt || undefined }),
+            body: JSON.stringify(fetchBody),
           }
         );
 
@@ -881,20 +1182,70 @@ export default function App() {
     [generateModalStore, handleGenerateTranslations]
   );
 
-  const handleDownloadAppleCfBundleList = useCallback(async () => {
+  const handleFieldUpdaterStart = useCallback(
+    (store: StoreId, fields: string[], masterPrompt: string) => {
+      setIsFieldUpdaterOpen(false);
+      void handleGenerateTranslations(store, [], masterPrompt, 'update_existing', fields);
+    },
+    [handleGenerateTranslations]
+  );
+
+  const loadStoreTitleMap = useCallback(async (appId: number, store: StoreId) => {
+    const payload = await api<StoreLocaleDetailsListPayload>(
+      `/api/apps/${appId}/locales/details?store=${store}`
+    );
+    const map = new Map<string, string>();
+    for (const entry of payload.entries) {
+      const locale = entry.locale.trim();
+      if (!locale) continue;
+      map.set(locale, readStoreTitleFromDetail(store, entry.detail));
+    }
+    return map;
+  }, []);
+
+  const handleOpenRnLocales = useCallback(() => {
+    setRnLocalesStore('app_store');
+    setIsRnLocalesOpen(true);
+  }, []);
+
+  const handleExportRnLocales = useCallback(async () => {
     if (!selectedAppId) return;
 
+    const store = rnLocalesStore;
+    const fieldKey = store === 'app_store' ? 'appName' : 'title';
+    const locales =
+      store === 'app_store'
+        ? toSortedUniqueLocaleList(effectiveIosLocales)
+        : toSortedUniqueLocaleList(effectivePlayLocales);
+
     try {
-      const payload = await api<AppleCfBundleListResponse>(
-        `/api/apps/${selectedAppId}/apple-cfbundle-list`
-      );
+      const titleMap = await loadStoreTitleMap(selectedAppId, store);
+      const localePayload: NonNullable<RnLocalePayload['locales']> = {};
+
+      for (const locale of locales) {
+        const pendingKey = toStoreChangeKey(store, locale, fieldKey);
+        const pendingChange = pendingStoreChanges[pendingKey];
+        const pendingTitle =
+          pendingChange && pendingChange.kind === 'field'
+            ? pendingChange.newValue.trim()
+            : '';
+        const existingTitle = titleMap.get(locale)?.trim() || '';
+        const appName = pendingTitle || existingTitle;
+
+        localePayload[locale] = {
+          app_name: appName,
+          CFBundleDisplayName: appName,
+          CFBundleName: appName,
+        };
+      }
 
       const fileBase = (selectedApp?.canonicalName || `app-${selectedAppId}`)
         .replace(/[^a-zA-Z0-9-_]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
-      const fileName = `${fileBase || `app-${selectedAppId}`}-apple-cfbundle-list.json`;
-      const text = JSON.stringify({ locales: payload.locales }, null, 2);
+      const storeSuffix = store === 'app_store' ? 'ios' : 'play-store';
+      const fileName = `${fileBase || `app-${selectedAppId}`}-rn-locales-${storeSuffix}.json`;
+      const text = JSON.stringify({ locales: localePayload }, null, 2);
       const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -905,17 +1256,22 @@ export default function App() {
       anchor.remove();
       URL.revokeObjectURL(url);
 
-      if (payload.unsupportedInCatalog.length > 0) {
-        pushStatus(
-          `Apple CFBundleList indirildi (${payload.localeCount} locale). Katalog dışı locale: ${payload.unsupportedInCatalog.join(', ')}`
-        );
-      } else {
-        pushStatus(`Apple CFBundleList indirildi (${payload.localeCount} locale).`);
-      }
+      pushStatus(
+        `RN locales export indirildi (${store === 'app_store' ? 'iOS' : 'Play Store'} / ${locales.length} locale).`
+      );
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [pushStatus, selectedApp?.canonicalName, selectedAppId]);
+  }, [
+    effectiveIosLocales,
+    effectivePlayLocales,
+    loadStoreTitleMap,
+    pendingStoreChanges,
+    pushStatus,
+    rnLocalesStore,
+    selectedApp?.canonicalName,
+    selectedAppId,
+  ]);
 
   const handleDeleteApp = useCallback(async () => {
     if (!selectedAppId) return;
@@ -990,7 +1346,12 @@ export default function App() {
   );
 
   const handleQueueLocaleChange = useCallback(
-    (store: StoreId, locale: string, action: 'add' | 'remove') => {
+    (
+      store: StoreId,
+      locale: string,
+      action: 'add' | 'remove',
+      options?: { forceUnsupportedAdd?: boolean }
+    ) => {
       const targetLocale = locale.trim();
       if (!targetLocale) return;
 
@@ -999,7 +1360,7 @@ export default function App() {
           entry.locale === targetLocale &&
           (store === 'app_store' ? entry.iosSupported : entry.androidSupported)
       );
-      if (action === 'add' && !isSupportedForStore) {
+      if (action === 'add' && !isSupportedForStore && !options?.forceUnsupportedAdd) {
         pushStatus(
           `${store === 'app_store' ? 'iOS' : 'Play Store'} için desteklenmeyen locale: ${targetLocale}`
         );
@@ -1141,6 +1502,197 @@ export default function App() {
       });
     },
     []
+  );
+
+  const handleImportRnLocales = useCallback(
+    async (rawText: string) => {
+      if (!selectedAppId) return;
+
+      const store = rnLocalesStore;
+      const storeLabel = store === 'app_store' ? 'iOS' : 'Play Store';
+      const fieldKey = store === 'app_store' ? 'appName' : 'title';
+
+      try {
+        const parsed = parseRnLocalePayloadFromText(rawText);
+
+        const localeEntries =
+          parsed && typeof parsed === 'object' && parsed.locales && typeof parsed.locales === 'object'
+            ? Object.entries(parsed.locales)
+            : [];
+
+        if (localeEntries.length === 0) {
+          pushStatus('RN locales import dosyasında geçerli `locales` alanı bulunamadı.');
+          return;
+        }
+
+        const titleMap = await loadStoreTitleMap(selectedAppId, store);
+        const effectiveLocales =
+          store === 'app_store'
+            ? toSortedUniqueLocaleList(effectiveIosLocales)
+            : toSortedUniqueLocaleList(effectivePlayLocales);
+        const existingLocaleSet = new Set(effectiveLocales);
+        const supportedLocaleSet = new Set(
+          localeCatalog
+            .filter((entry) =>
+              store === 'app_store' ? entry.iosSupported : entry.androidSupported
+            )
+            .map((entry) => entry.locale)
+        );
+
+        let queuedLocaleAdds = 0;
+        let queuedFieldUpdates = 0;
+        let skippedInvalid = 0;
+
+        for (const [rawLocale, rawValue] of localeEntries) {
+          const sourceLocale = typeof rawLocale === 'string' ? rawLocale.trim() : '';
+          if (!sourceLocale) {
+            skippedInvalid += 1;
+            continue;
+          }
+          const locale = resolveImportedLocaleForStore(
+            sourceLocale,
+            existingLocaleSet,
+            supportedLocaleSet
+          );
+          if (!locale) {
+            skippedInvalid += 1;
+            continue;
+          }
+
+          const existsInWeb = existingLocaleSet.has(locale);
+
+          const importedName = readImportedRnLocaleName(rawValue);
+          const pendingKey = toStoreChangeKey(store, locale, fieldKey);
+          const queuedField = pendingStoreChanges[pendingKey];
+          const currentValue =
+            queuedField && queuedField.kind === 'field'
+              ? queuedField.newValue
+              : titleMap.get(locale) || '';
+          const originalValue =
+            queuedField && queuedField.kind === 'field'
+              ? queuedField.oldValue
+              : titleMap.get(locale) || '';
+
+          if (!existsInWeb) {
+            handleQueueLocaleChange(store, locale, 'add', { forceUnsupportedAdd: true });
+            queuedLocaleAdds += 1;
+            existingLocaleSet.add(locale);
+          }
+
+          if (importedName !== currentValue) {
+            handleStoreFieldChange({
+              store,
+              locale,
+              field: fieldKey,
+              originalValue,
+              nextValue: importedName,
+            });
+            queuedFieldUpdates += 1;
+          }
+        }
+
+        if (queuedLocaleAdds > 0 || queuedFieldUpdates > 0) {
+          setIsChangeDrawerOpen(true);
+          pushStatus(
+            `RN locales import (${storeLabel}): ${queuedLocaleAdds} locale ekleme + ${queuedFieldUpdates} başlık değişikliği kuyruğa alındı.`
+          );
+        } else {
+          pushStatus(`RN locales import (${storeLabel}): fark bulunamadı.`);
+        }
+
+        if (skippedInvalid > 0) {
+          pushStatus(`RN locales import: ${skippedInvalid} geçersiz locale satırı atlandı.`);
+        }
+      } catch (error) {
+        pushStatus(`RN locales import hatası: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [
+      effectiveIosLocales,
+      effectivePlayLocales,
+      handleQueueLocaleChange,
+      handleStoreFieldChange,
+      localeCatalog,
+      loadStoreTitleMap,
+      pendingStoreChanges,
+      pushStatus,
+      rnLocalesStore,
+      selectedAppId,
+    ]
+  );
+
+  const handleExportChangeQueue = useCallback(() => {
+    if (pendingChangeEntries.length === 0) return;
+
+    try {
+      const fileBase = (selectedApp?.canonicalName || `app-${selectedAppId || 'unknown'}`)
+        .replace(/[^a-zA-Z0-9-_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+      const fileName = `${fileBase || 'change-queue'}-change-queue.json`;
+      const payload: ChangeQueuePayload = {
+        version: 1,
+        appId: selectedAppId ?? undefined,
+        exportedAt: new Date().toISOString(),
+        changes: pendingChangeEntries.map((change) =>
+          change.kind === 'locale'
+            ? {
+                kind: 'locale',
+                store: change.store,
+                locale: change.locale,
+                action: change.action,
+              }
+            : {
+                kind: 'field',
+                store: change.store,
+                locale: change.locale,
+                field: change.field,
+                oldValue: change.oldValue,
+                newValue: change.newValue,
+              }
+        ),
+      };
+
+      const text = JSON.stringify(payload, null, 2);
+      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      pushStatus(`Değişiklik listesi export edildi (${pendingChangeEntries.length} kayıt).`);
+    } catch (error) {
+      pushStatus(`Değişiklik listesi export hatası: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [pendingChangeEntries, pushStatus, selectedApp?.canonicalName, selectedAppId]);
+
+  const handleImportChangeQueue = useCallback(
+    (rawText: string) => {
+      try {
+        const importedMap = parseChangeQueuePayloadFromText(rawText);
+        const importedKeys = Object.keys(importedMap);
+        if (importedKeys.length === 0) {
+          pushStatus('Değişiklik listesi import içinde geçerli kayıt bulunamadı.');
+          return;
+        }
+
+        const overriddenCount = importedKeys.filter((key) => pendingStoreChanges[key]).length;
+        setPendingStoreChanges((prev) => ({ ...prev, ...importedMap }));
+        setIsChangeDrawerOpen(true);
+
+        pushStatus(
+          `Değişiklik listesi import edildi (${importedKeys.length} kayıt).` +
+          (overriddenCount > 0 ? ` ${overriddenCount} kayıt güncellendi.` : '')
+        );
+      } catch (error) {
+        pushStatus(`Değişiklik listesi import hatası: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [pendingStoreChanges, pushStatus]
   );
 
   const handleClearPendingChanges = useCallback(() => {
@@ -1352,15 +1904,14 @@ export default function App() {
             }}
             onGenerateAppStore={() => setGenerateModalStore('app_store')}
             onGeneratePlay={() => setGenerateModalStore('play_store')}
+            onFieldUpdater={() => setIsFieldUpdaterOpen(true)}
             onCopyIosToPlay={() => {
               void handleCopyIosToPlay();
             }}
             onCopyPlayToIos={() => {
               void handleCopyPlayToIos();
             }}
-            onDownloadAppleCfBundleList={() => {
-              void handleDownloadAppleCfBundleList();
-            }}
+            onOpenRnLocales={handleOpenRnLocales}
             onDeleteApp={() => {
               void handleDeleteApp();
             }}
@@ -1426,6 +1977,8 @@ export default function App() {
         changes={pendingChangeEntries}
         onToggle={() => setIsChangeDrawerOpen((prev) => !prev)}
         onClear={handleClearPendingChanges}
+        onExport={handleExportChangeQueue}
+        onImport={handleImportChangeQueue}
         onApplyStore={handleApplyPendingChanges}
         onApply={() => handleApplyPendingChanges()}
       />
@@ -1475,6 +2028,30 @@ export default function App() {
         onClose={() => setGenerateModalStore(null)}
         onStart={handleStartGenerate}
         isRunning={isApplyingConfig}
+      />
+
+      <FieldUpdaterDialog
+        isOpen={isFieldUpdaterOpen}
+        onClose={() => setIsFieldUpdaterOpen(false)}
+        onStart={handleFieldUpdaterStart}
+        isRunning={isApplyingConfig}
+        iosLocales={iosLocales}
+        playLocales={playLocales}
+        sourceLocale={selectedApp?.sourceLocale || 'en-US'}
+      />
+
+      <RnLocalesDialog
+        isOpen={isRnLocalesOpen}
+        selectedStore={rnLocalesStore}
+        isBusy={isApplyingConfig}
+        onClose={() => setIsRnLocalesOpen(false)}
+        onSelectStore={setRnLocalesStore}
+        onExport={() => {
+          void handleExportRnLocales();
+        }}
+        onImport={(text) => {
+          void handleImportRnLocales(text);
+        }}
       />
     </>
   );
