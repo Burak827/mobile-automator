@@ -22,12 +22,19 @@ import {
   validateNamingConsistency,
 } from "./storeRules.js";
 import {
+  APP_STORE_LOCALES,
+  PLAY_STORE_LOCALES,
   ALL_STORE_LOCALES,
   buildLocaleMatrix,
   iosToPlayLocale,
   LOCALE_CATALOG,
   playToIosLocale,
 } from "./localeCatalog.js";
+import {
+  translateWithOpenAI,
+  shortenWithOpenAI,
+  type OpenAIConfig,
+} from "../translate.js";
 
 const env = loadEnvConfig();
 const WEB_PORT = Number(env.webPort ?? "8787");
@@ -175,6 +182,12 @@ function parseJsonOrUndefined(raw?: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function toNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function buildAppStoreDetailEntries(snapshot: AppStoreSnapshot): Array<{
@@ -888,24 +901,30 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
       }
     }
 
-    // GPC — all in one edit batch
+    // GPC — each locale independently (one edit per locale for resilience)
     if (gpcChanges.length > 0) {
-      const gpcAdds = gpcChanges
-        .filter((c) => c.action === "add" || c.action === "update")
-        .map((c) => ({ locale: c.locale, fields: c.fields ?? {} }));
-      const gpcRemoves = gpcChanges
-        .filter((c) => c.action === "remove")
-        .map((c) => c.locale);
-      try {
-        if (gpcAdds.length > 0 || gpcRemoves.length > 0) {
-          await storeApi.applyPlayStoreLocaleChanges(appRow, gpcAdds, gpcRemoves);
-        }
-        succeeded.push(...gpcChanges);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        for (const change of gpcChanges) {
-          failed.push({ ...change, error: message });
+      const results = await Promise.allSettled(
+        gpcChanges.map(async (change) => {
+          if (change.action === "add" || change.action === "update") {
+            await storeApi.applyPlayStoreSingleLocale(appRow, change.locale, change.fields ?? {});
+          } else {
+            await storeApi.deletePlayStoreSingleLocale(appRow, change.locale);
+          }
+        })
+      );
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const change = gpcChanges[i];
+        if (result.status === "fulfilled") {
+          succeeded.push(change);
+        } else {
+          failed.push({
+            ...change,
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+          });
         }
       }
     }
@@ -1116,6 +1135,93 @@ app.get("/api/apps/:id/ios-info-plist/:locale", (req, res, next) => {
   }
 });
 
+app.get("/api/apps/:id/apple-cfbundle-list", (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    const appRow = mustGetApp(appId);
+
+    const appStoreLocaleRows = repo
+      .listStoreLocales(appId)
+      .filter((row) => row.store === "app_store");
+    const appStoreLocales = Array.from(
+      new Set(appStoreLocaleRows.map((row) => row.locale.trim()).filter((x) => x.length > 0))
+    ).sort((a, b) => a.localeCompare(b));
+
+    const namingByLocale = new Map(
+      repo
+        .listNamingOverrides(appId)
+        .map((row) => [row.locale, row] as const)
+    );
+
+    const detailByLocale = new Map<string, Record<string, unknown>>();
+    for (const row of repo.listStoreLocaleDetails(appId, "app_store")) {
+      const parsed = parseJsonOrUndefined(row.detailJson);
+      if (parsed && typeof parsed === "object") {
+        detailByLocale.set(row.locale, parsed as Record<string, unknown>);
+      }
+    }
+
+    const sourceLocale = appRow.sourceLocale;
+    const sourceDetail = detailByLocale.get(sourceLocale);
+    const sourceAppInfo =
+      sourceDetail?.appInfo && typeof sourceDetail.appInfo === "object"
+        ? (sourceDetail.appInfo as Record<string, unknown>)
+        : undefined;
+    const sourceFallbackName = toNonEmptyString(sourceAppInfo?.name);
+
+    const localesPayload: Record<
+      string,
+      {
+        app_name: string;
+        CFBundleDisplayName: string;
+        CFBundleName: string;
+      }
+    > = {};
+
+    for (const locale of appStoreLocales) {
+      const naming = namingByLocale.get(locale);
+      const detail = detailByLocale.get(locale);
+      const appInfo =
+        detail?.appInfo && typeof detail.appInfo === "object"
+          ? (detail.appInfo as Record<string, unknown>)
+          : undefined;
+
+      const appStoreName =
+        toNonEmptyString(naming?.appStoreName) ??
+        toNonEmptyString(appInfo?.name) ??
+        sourceFallbackName ??
+        appRow.canonicalName;
+
+      const bundleName =
+        toNonEmptyString(naming?.iosBundleDisplayName) ??
+        appStoreName ??
+        appRow.canonicalName;
+
+      localesPayload[locale] = {
+        app_name: appStoreName,
+        CFBundleDisplayName: bundleName,
+        CFBundleName: bundleName,
+      };
+    }
+
+    const appStoreCatalogSet = new Set(APP_STORE_LOCALES);
+    const unsupportedInCatalog = appStoreLocales.filter(
+      (locale) => !appStoreCatalogSet.has(locale)
+    );
+
+    res.json({
+      appId,
+      sourceLocale,
+      generatedAt: new Date().toISOString(),
+      localeCount: Object.keys(localesPayload).length,
+      unsupportedInCatalog,
+      locales: localesPayload,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/apps/:id/connections/test", async (req, res, next) => {
   try {
     const appId = parseId(req.params.id);
@@ -1270,6 +1376,409 @@ app.get("/api/sync-jobs/:jobId", (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AI Translation — NDJSON streaming endpoint
+// ---------------------------------------------------------------------------
+
+type TranslationField = {
+  fieldId: string;
+  maxChars: number;
+  unit: "chars" | "bytes";
+  storeName: string;
+};
+
+function getTranslatableFields(store: StoreId): TranslationField[] {
+  const rules = STORE_RULES[store];
+  const storeName = rules.displayName;
+  return Object.entries(rules.fields)
+    .filter(([, rule]) => typeof rule.maxChars === "number")
+    .map(([fieldId, rule]) => ({
+      fieldId,
+      maxChars: rule.maxChars!,
+      unit: rule.unit ?? "chars",
+      storeName,
+    }));
+}
+
+function extractFieldValue(
+  detail: Record<string, unknown>,
+  store: StoreId,
+  fieldId: string
+): string {
+  if (store === "app_store") {
+    const appInfo = detail.appInfo as Record<string, unknown> | undefined;
+    const versionLoc = detail.versionLocalization as Record<string, unknown> | undefined;
+    switch (fieldId) {
+      case "appName": return (appInfo?.name as string) ?? "";
+      case "subtitle": return (appInfo?.subtitle as string) ?? "";
+      case "promotionalText": return (versionLoc?.promotionalText as string) ?? "";
+      case "description": return (versionLoc?.description as string) ?? "";
+      case "whatsNew": return (versionLoc?.whatsNew as string) ?? "";
+      case "keywords": return (versionLoc?.keywords as string) ?? "";
+      default: return "";
+    }
+  }
+  // play_store
+  const listing = detail.listing as Record<string, unknown> | undefined;
+  switch (fieldId) {
+    case "title": return (listing?.title as string) ?? "";
+    case "shortDescription": return (listing?.shortDescription as string) ?? "";
+    case "fullDescription": return (listing?.fullDescription as string) ?? "";
+    default: return "";
+  }
+}
+
+function measureFieldLength(value: string, unit: "chars" | "bytes"): number {
+  if (unit === "bytes") return new TextEncoder().encode(value).length;
+  return value.length;
+}
+
+async function translateWithRetry(
+  args: Parameters<typeof translateWithOpenAI>[0],
+  maxRetries = 5
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await translateWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      if (status !== 429) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
+async function shortenWithRetry(
+  args: Parameters<typeof shortenWithOpenAI>[0],
+  maxRetries = 5
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await shortenWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      if (status !== 429) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
+app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    const appRow = mustGetApp(appId);
+    const store = parseStoreId(
+      (typeof req.query.store === "string" ? req.query.store : undefined) ??
+        (typeof (req.body as Record<string, unknown>)?.store === "string"
+          ? (req.body as Record<string, unknown>).store as string
+          : "")
+    );
+
+    const body = req.body as Record<string, unknown>;
+    const requestedLocales = Array.isArray(body.locales)
+      ? (body.locales as unknown[]).filter((l): l is string => typeof l === "string")
+      : null;
+    const masterPrompt = typeof body.masterPrompt === "string" ? body.masterPrompt.trim() : "";
+
+    const openaiApiKey = env.openaiApiKey;
+    const openaiModel = env.openaiModel ?? "gpt-4o-mini";
+    if (!openaiApiKey) {
+      res.status(400).json({ error: "OPENAI_API_KEY is not configured." });
+      return;
+    }
+    const aiConfig: OpenAIConfig = {
+      apiKey: openaiApiKey,
+      model: openaiModel,
+      baseUrl: env.openaiBaseUrl,
+    };
+
+    // Source locale detail
+    const sourceLocale = appRow.sourceLocale || "en-US";
+    const sourceDetailRow = repo.getStoreLocaleDetail(appId, store, sourceLocale);
+    if (!sourceDetailRow) {
+      res.status(400).json({
+        error: `Source locale (${sourceLocale}) detail not found for ${store}. Sync first.`,
+      });
+      return;
+    }
+    const sourceDetail = JSON.parse(sourceDetailRow.detailJson) as Record<string, unknown>;
+
+    // Target locales: all supported locales for this store that don't have detail in DB yet
+    const allSupportedLocales = store === "app_store" ? APP_STORE_LOCALES : PLAY_STORE_LOCALES;
+    let targetLocales = allSupportedLocales
+      .filter((l) => l !== sourceLocale)
+      .filter((l) => !repo.getStoreLocaleDetail(appId, store, l))
+      .sort((a, b) => a.localeCompare(b));
+
+    // If client specified locales, intersect with available set
+    if (requestedLocales && requestedLocales.length > 0) {
+      const requestedSet = new Set(requestedLocales);
+      targetLocales = targetLocales.filter((l) => requestedSet.has(l));
+    }
+
+    if (targetLocales.length === 0) {
+      res.status(400).json({ error: "No target locales to translate." });
+      return;
+    }
+
+    // Get translatable fields and source values
+    const translatableFields = getTranslatableFields(store);
+    const sourceTexts = new Map<string, string>();
+    for (const tf of translatableFields) {
+      const value = extractFieldValue(sourceDetail, store, tf.fieldId);
+      if (value.trim()) {
+        sourceTexts.set(tf.fieldId, value);
+      }
+    }
+
+    if (sourceTexts.size === 0) {
+      res.status(400).json({ error: "Source locale has no text to translate." });
+      return;
+    }
+
+    // Determine which fields each locale is missing
+    const titleFieldId = store === "app_store" ? "appName" : "title";
+    const otherFields = translatableFields.filter((tf) => tf.fieldId !== titleFieldId);
+    const titleField = translatableFields.find((tf) => tf.fieldId === titleFieldId);
+
+    type LocaleWork = {
+      locale: string;
+      missingFields: string[];         // fieldIds that need translation
+      targetDetail: Record<string, unknown> | null;
+    };
+
+    const localeWorkList: LocaleWork[] = [];
+    for (const targetLocale of targetLocales) {
+      const targetDetailRow = repo.getStoreLocaleDetail(appId, store, targetLocale);
+      const targetDetail = targetDetailRow
+        ? (JSON.parse(targetDetailRow.detailJson) as Record<string, unknown>)
+        : null;
+
+      // Only include fields that have source text but no target value
+      const missingFields: string[] = [];
+      for (const tf of translatableFields) {
+        if (!sourceTexts.has(tf.fieldId)) continue;
+        const existingValue = targetDetail
+          ? extractFieldValue(targetDetail, store, tf.fieldId).trim()
+          : "";
+        if (!existingValue) {
+          missingFields.push(tf.fieldId);
+        }
+      }
+
+      if (missingFields.length > 0) {
+        localeWorkList.push({ locale: targetLocale, missingFields, targetDetail });
+      }
+    }
+
+    if (localeWorkList.length === 0) {
+      res.status(400).json({ error: "All target locales already have translations. No missing fields." });
+      return;
+    }
+
+    // Set up NDJSON streaming
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.flushHeaders();
+
+    const writeLine = (data: Record<string, unknown>) => {
+      res.write(JSON.stringify(data) + "\n");
+    };
+
+    writeLine({ type: "start", totalLocales: localeWorkList.length, sourceLocale, store });
+
+    const DELAY_BETWEEN_CALLS_MS = 500;
+
+    // Helper: translate a single field with retry + shorten logic
+    async function translateField(
+      tf: TranslationField,
+      targetLocale: string,
+      appTitle?: string,
+    ): Promise<{ value: string; ok: boolean }> {
+      const sourceText = sourceTexts.get(tf.fieldId)!;
+
+      let translated = await translateWithRetry({
+        config: aiConfig,
+        sourceLocale,
+        targetLocale,
+        text: sourceText,
+        fieldName: tf.fieldId,
+        maxLength: tf.maxChars,
+        lengthUnit: tf.unit === "bytes" ? "bytes" : "characters",
+        storeName: tf.storeName,
+        appTitle,
+        masterPrompt: masterPrompt || undefined,
+      });
+
+      let len = measureFieldLength(translated, tf.unit);
+
+      writeLine({
+        type: "progress",
+        locale: targetLocale,
+        field: tf.fieldId,
+        status: "translated",
+        chars: len,
+        maxChars: tf.maxChars,
+      });
+
+      // Shorten if over limit
+      if (len > tf.maxChars) {
+        translated = await shortenWithRetry({
+          config: aiConfig,
+          targetLocale,
+          text: translated,
+          fieldName: tf.fieldId,
+          maxLength: tf.maxChars,
+          lengthUnit: tf.unit === "bytes" ? "bytes" : "characters",
+          storeName: tf.storeName,
+          masterPrompt: masterPrompt || undefined,
+        });
+        len = measureFieldLength(translated, tf.unit);
+
+        writeLine({
+          type: "progress",
+          locale: targetLocale,
+          field: tf.fieldId,
+          status: "shortened",
+          chars: len,
+          maxChars: tf.maxChars,
+        });
+
+        if (len > tf.maxChars) {
+          writeLine({
+            type: "error",
+            locale: targetLocale,
+            field: tf.fieldId,
+            error: `Still over limit after shortening (${len}/${tf.maxChars}). Skipped.`,
+          });
+          return { value: "", ok: false };
+        }
+      }
+
+      return { value: translated, ok: true };
+    }
+
+    // Phase 1: Translate title/appName for all locales that need it
+    const translatedTitles = new Map<string, string>(); // locale -> translated title
+
+    if (titleField && sourceTexts.has(titleFieldId)) {
+      const localesNeedingTitle = localeWorkList.filter((lw) => lw.missingFields.includes(titleFieldId));
+      for (const lw of localesNeedingTitle) {
+        try {
+          const result = await translateField(titleField, lw.locale);
+          if (result.ok) {
+            translatedTitles.set(lw.locale, result.value);
+          }
+          await new Promise((r) => setTimeout(r, DELAY_BETWEEN_CALLS_MS));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          writeLine({ type: "error", locale: lw.locale, field: titleFieldId, error: msg });
+        }
+      }
+    }
+
+    // Phase 2: Translate remaining fields per locale, using title as context
+    // Then emit locale_done events
+    let translatedCount = 0;
+
+    for (const lw of localeWorkList) {
+      const translatedFields: Array<{ field: string; value: string; oldValue: string }> = [];
+
+      // Include title result from phase 1
+      if (translatedTitles.has(lw.locale)) {
+        const oldValue = lw.targetDetail
+          ? extractFieldValue(lw.targetDetail, store, titleFieldId)
+          : "";
+        translatedFields.push({ field: titleFieldId, value: translatedTitles.get(lw.locale)!, oldValue });
+      }
+
+      // Resolve app title for context: use translated title, or existing title from target detail
+      const existingTitle = lw.targetDetail
+        ? extractFieldValue(lw.targetDetail, store, titleFieldId).trim()
+        : "";
+      const appTitle: string | undefined =
+        translatedTitles.get(lw.locale) ?? (existingTitle || undefined);
+
+      // Translate other missing fields
+      const remainingFields = lw.missingFields.filter((fid) => fid !== titleFieldId);
+      let skippedLocale = false;
+
+      for (const fieldId of remainingFields) {
+        const tf = otherFields.find((f) => f.fieldId === fieldId);
+        if (!tf) continue;
+
+        const oldValue = lw.targetDetail
+          ? extractFieldValue(lw.targetDetail, store, tf.fieldId)
+          : "";
+
+        try {
+          const result = await translateField(tf, lw.locale, appTitle);
+          if (result.ok) {
+            translatedFields.push({ field: tf.fieldId, value: result.value, oldValue });
+          }
+          await new Promise((r) => setTimeout(r, DELAY_BETWEEN_CALLS_MS));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          writeLine({ type: "error", locale: lw.locale, field: tf.fieldId, error: msg });
+          if (translatedFields.length === 0) {
+            skippedLocale = true;
+            break;
+          }
+        }
+      }
+
+      if (skippedLocale) {
+        writeLine({ type: "locale_skip", locale: lw.locale, reason: "Translation failed" });
+        continue;
+      }
+
+      if (translatedFields.length > 0) {
+        translatedCount++;
+        const existsInStore = repo
+          .listStoreLocales(appId)
+          .some((r) => r.store === store && r.locale === lw.locale);
+        writeLine({
+          type: "locale_done",
+          locale: lw.locale,
+          isNewLocale: !existsInStore,
+          fields: translatedFields.map((f) => ({
+            field: f.field,
+            value: f.value,
+            oldValue: f.oldValue,
+          })),
+        });
+      }
+    }
+
+    writeLine({
+      type: "done",
+      translated: translatedCount,
+    });
+
+    res.end();
+  } catch (error) {
+    if (!res.headersSent) {
+      next(error);
+    } else {
+      try {
+        res.write(JSON.stringify({ type: "fatal", error: error instanceof Error ? error.message : String(error) }) + "\n");
+      } catch { /* ignore write errors */ }
+      res.end();
+    }
   }
 });
 

@@ -5,6 +5,7 @@ import AppDetailsPanel from './components/organisms/AppDetailsPanel';
 import AppListSidebar from './components/organisms/AppListSidebar';
 import ChangeQueueDrawer from './components/organisms/ChangeQueueDrawer';
 import CreateAppDialog from './components/organisms/CreateAppDialog';
+import GenerateTranslationsDialog from './components/organisms/GenerateTranslationsDialog';
 import HeaderBar from './components/organisms/HeaderBar';
 import RulesDialog from './components/organisms/RulesDialog';
 import StoreLocalePanels from './components/organisms/StoreLocalePanels';
@@ -57,6 +58,22 @@ type AppsResponse = {
 
 type AppResponse = {
   app: AppRecord;
+};
+
+type AppleCfBundleListResponse = {
+  appId: number;
+  sourceLocale: string;
+  generatedAt: string;
+  localeCount: number;
+  unsupportedInCatalog: string[];
+  locales: Record<
+    string,
+    {
+      app_name: string;
+      CFBundleDisplayName: string;
+      CFBundleName: string;
+    }
+  >;
 };
 
 function normalizeLocaleCatalog(rows: unknown): LocaleCatalogEntry[] {
@@ -225,6 +242,7 @@ export default function App() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
+  const [generateModalStore, setGenerateModalStore] = useState<StoreId | null>(null);
 
   const [createForm, setCreateForm] = useState<AppConfigForm>(EMPTY_CREATE_FORM);
   const [appConfig, setAppConfig] = useState<AppConfigForm>(EMPTY_APP_CONFIG);
@@ -447,6 +465,20 @@ export default function App() {
 
     return base;
   }, [appConfig.sourceLocale, createForm.sourceLocale, localeCatalog]);
+
+  const generateMissingLocales = useMemo(() => {
+    if (!generateModalStore) return [];
+    const supported = localeCatalog
+      .filter((e) =>
+        generateModalStore === 'app_store' ? e.iosSupported : e.androidSupported
+      )
+      .map((e) => e.locale);
+    const existing = new Set(
+      generateModalStore === 'app_store' ? iosLocales : playLocales
+    );
+    const source = selectedApp?.sourceLocale || 'en-US';
+    return supported.filter((l) => l !== source && !existing.has(l)).sort();
+  }, [generateModalStore, localeCatalog, iosLocales, playLocales, selectedApp]);
 
   const hasConfigChanges = useMemo(() => {
     if (!selectedApp) return false;
@@ -713,6 +745,177 @@ export default function App() {
       pushStatus(error instanceof Error ? error.message : String(error));
     }
   }, [populateQueueFromDiff, pushStatus, selectedAppId]);
+
+  const handleGenerateTranslations = useCallback(
+    async (store: StoreId, locales: string[], masterPrompt: string) => {
+      if (!selectedAppId) return;
+
+      const storeName = store === 'app_store' ? 'App Store' : 'Play Store';
+      setIsApplyingConfig(true);
+      pushStatus(`✨ ${storeName} çevirileri oluşturuluyor (${locales.length} locale)...`);
+
+      try {
+        const response = await fetch(
+          `/api/apps/${selectedAppId}/generate-translations?store=${encodeURIComponent(store)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ store, locales, masterPrompt: masterPrompt || undefined }),
+          }
+        );
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          let message = `HTTP ${response.status}`;
+          try {
+            const parsed = JSON.parse(errBody);
+            if (parsed.error) message = parsed.error;
+          } catch { /* ignore */ }
+          pushStatus(`Hata: ${message}`);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          pushStatus('Hata: Stream okunamadı.');
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const collectedLocales: Array<{
+          locale: string;
+          isNewLocale: boolean;
+          fields: Array<{ field: string; value: string; oldValue: string }>;
+        }> = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(line);
+            } catch {
+              continue;
+            }
+
+            const type = event.type as string;
+
+            if (type === 'start') {
+              pushStatus(`${event.totalLocales} locale çevrilecek (${storeName})`);
+            } else if (type === 'progress') {
+              const status = event.status as string;
+              const locale = event.locale as string;
+              const field = event.field as string;
+              const chars = event.chars as number;
+              const maxChars = event.maxChars as number;
+              if (status === 'translated') {
+                pushStatus(`  ${locale}: ${field} çevrildi (${chars}/${maxChars})`);
+              } else if (status === 'shortened') {
+                pushStatus(`  ${locale}: ${field} kısaltıldı (${chars}/${maxChars})`);
+              }
+            } else if (type === 'locale_done') {
+              const locale = event.locale as string;
+              const isNewLocale = event.isNewLocale as boolean;
+              const fields = event.fields as Array<{
+                field: string;
+                value: string;
+                oldValue: string;
+              }>;
+              collectedLocales.push({ locale, isNewLocale, fields });
+              pushStatus(`✓ ${locale}: ${fields.length} alan çevrildi`);
+            } else if (type === 'locale_skip') {
+              pushStatus(`⚠ ${event.locale}: Atlandı — ${event.reason}`);
+            } else if (type === 'error') {
+              pushStatus(`✗ ${event.locale}/${event.field}: ${event.error}`);
+            } else if (type === 'done') {
+              pushStatus(`✨ Çeviri tamamlandı (${collectedLocales.length} locale)`);
+            } else if (type === 'fatal') {
+              pushStatus(`Kritik hata: ${event.error}`);
+            }
+          }
+        }
+
+        // Populate change queue from collected results
+        if (collectedLocales.length > 0) {
+          const diffResult: StoreDiffResponse = {
+            entries: collectedLocales.map((cl) => ({
+              sourceLocale: '',
+              targetLocale: cl.locale,
+              targetStore: store,
+              isNewLocale: cl.isNewLocale,
+              fields: cl.fields.map((f) => ({
+                field: f.field,
+                newValue: f.value,
+                oldValue: f.oldValue,
+              })),
+            })),
+            skipped: [],
+          };
+          populateQueueFromDiff(diffResult);
+          setIsChangeDrawerOpen(true);
+        }
+      } catch (error) {
+        pushStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        setIsApplyingConfig(false);
+      }
+    },
+    [populateQueueFromDiff, pushStatus, selectedAppId]
+  );
+
+  const handleStartGenerate = useCallback(
+    (locales: string[], masterPrompt: string) => {
+      const store = generateModalStore;
+      if (!store) return;
+      setGenerateModalStore(null);
+      void handleGenerateTranslations(store, locales, masterPrompt);
+    },
+    [generateModalStore, handleGenerateTranslations]
+  );
+
+  const handleDownloadAppleCfBundleList = useCallback(async () => {
+    if (!selectedAppId) return;
+
+    try {
+      const payload = await api<AppleCfBundleListResponse>(
+        `/api/apps/${selectedAppId}/apple-cfbundle-list`
+      );
+
+      const fileBase = (selectedApp?.canonicalName || `app-${selectedAppId}`)
+        .replace(/[^a-zA-Z0-9-_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+      const fileName = `${fileBase || `app-${selectedAppId}`}-apple-cfbundle-list.json`;
+      const text = JSON.stringify({ locales: payload.locales }, null, 2);
+      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      if (payload.unsupportedInCatalog.length > 0) {
+        pushStatus(
+          `Apple CFBundleList indirildi (${payload.localeCount} locale). Katalog dışı locale: ${payload.unsupportedInCatalog.join(', ')}`
+        );
+      } else {
+        pushStatus(`Apple CFBundleList indirildi (${payload.localeCount} locale).`);
+      }
+    } catch (error) {
+      pushStatus(error instanceof Error ? error.message : String(error));
+    }
+  }, [pushStatus, selectedApp?.canonicalName, selectedAppId]);
 
   const handleDeleteApp = useCallback(async () => {
     if (!selectedAppId) return;
@@ -1147,11 +1350,16 @@ export default function App() {
             onSubmitConfig={(event) => {
               void handleUpdateConfigSubmit(event);
             }}
+            onGenerateAppStore={() => setGenerateModalStore('app_store')}
+            onGeneratePlay={() => setGenerateModalStore('play_store')}
             onCopyIosToPlay={() => {
               void handleCopyIosToPlay();
             }}
             onCopyPlayToIos={() => {
               void handleCopyPlayToIos();
+            }}
+            onDownloadAppleCfBundleList={() => {
+              void handleDownloadAppleCfBundleList();
             }}
             onDeleteApp={() => {
               void handleDeleteApp();
@@ -1214,7 +1422,6 @@ export default function App() {
 
       <ChangeQueueDrawer
         isOpen={isChangeDrawerOpen}
-        isConsoleExpanded={isConsoleExpanded}
         isBusy={isApplyingConfig}
         changes={pendingChangeEntries}
         onToggle={() => setIsChangeDrawerOpen((prev) => !prev)}
@@ -1223,7 +1430,7 @@ export default function App() {
         onApply={() => handleApplyPendingChanges()}
       />
 
-      <section className={`console-dock ${isConsoleExpanded ? 'expanded' : 'collapsed'}`}>
+      <section className={`console-dock ${isConsoleExpanded ? 'expanded' : 'collapsed'} ${isChangeDrawerOpen ? 'changes-open' : ''}`}>
         <div className="card-head console-head">
           <h3>Konsol</h3>
           <Button
@@ -1259,6 +1466,15 @@ export default function App() {
         onReload={() => {
           void handleReloadMeta();
         }}
+      />
+
+      <GenerateTranslationsDialog
+        isOpen={generateModalStore !== null}
+        store={generateModalStore ?? 'app_store'}
+        missingLocales={generateMissingLocales}
+        onClose={() => setGenerateModalStore(null)}
+        onStart={handleStartGenerate}
+        isRunning={isApplyingConfig}
       />
     </>
   );

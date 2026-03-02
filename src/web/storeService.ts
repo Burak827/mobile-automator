@@ -846,9 +846,61 @@ export class StoreApiService {
   }
 
   // ---------------------------------------------------------------------------
-  // GPC locale mutations (batched in a single edit)
+  // GPC locale mutations — per-locale edits
   // ---------------------------------------------------------------------------
 
+  async applyPlayStoreSingleLocale(
+    app: AppRecord,
+    locale: string,
+    fields: Record<string, string>
+  ): Promise<void> {
+    const packageName = app.androidPackageName;
+    if (!packageName) throw new Error("androidPackageName missing");
+
+    const client = this.resolveGpcClient();
+    const editId = await client.createEdit(packageName);
+
+    try {
+      const gpcLocale = toStoreLocale(locale, "play_store");
+      await client.put(
+        `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`,
+        {
+          language: gpcLocale,
+          title: fields.title || "",
+          shortDescription: fields.shortDescription || "",
+          fullDescription: fields.fullDescription || "",
+        }
+      );
+      await client.commitEdit(packageName, editId);
+    } catch (error) {
+      await client.deleteEdit(packageName, editId).catch(() => {});
+      throw error;
+    }
+  }
+
+  async deletePlayStoreSingleLocale(
+    app: AppRecord,
+    locale: string
+  ): Promise<void> {
+    const packageName = app.androidPackageName;
+    if (!packageName) throw new Error("androidPackageName missing");
+
+    const client = this.resolveGpcClient();
+    const editId = await client.createEdit(packageName);
+
+    try {
+      const gpcLocale = toStoreLocale(locale, "play_store");
+      await client.delete(
+        `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`
+      );
+      await client.commitEdit(packageName, editId);
+    } catch (error) {
+      await client.deleteEdit(packageName, editId).catch(() => {});
+      throw error;
+    }
+  }
+
+  /** @deprecated Use applyPlayStoreSingleLocale / deletePlayStoreSingleLocale for per-locale resilience */
   async applyPlayStoreLocaleChanges(
     app: AppRecord,
     localesToAdd: Array<{ locale: string; fields: Record<string, string> }>,

@@ -17,10 +17,12 @@
   box-sizing: border-box;
 }
 
+
 body {
   margin: 0;
   padding: 14px;
   font-family: "Space Grotesk", sans-serif;
+  font-size: medium;
   color: var(--ink);
   background:
     radial-gradient(circle at 0% 0%, rgba(194, 106, 45, 0.18), transparent 42%),
@@ -76,7 +78,7 @@ p {
 }
 
 .header-title {
-  font-size: 1rem;
+  font-size: 0.875rem;
   line-height: 1.2;
 }
 
@@ -122,23 +124,23 @@ p {
 .app-shell {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 16px;
-  height: calc(100vh - 70px);
+  gap: 8px;
+  height: calc(100vh - 56px);
   transition: padding-right 180ms ease;
 }
 
 .app-shell.console-expanded {
-  height: calc(100vh - 320px);
+  height: calc(100vh - 220px);
 }
 
 .app-shell.changes-open {
-  padding-right: min(420px, 92vw);
+  padding-right: min(380px, 92vw);
 }
 
 .layout {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
-  gap: 16px;
+  gap: 8px;
   min-height: 0;
 }
 
@@ -178,7 +180,7 @@ p {
 
 .meta-card code {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   display: inline-block;
   padding: 2px 6px;
   border-radius: 6px;
@@ -187,7 +189,7 @@ p {
 }
 
 .meta-links {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   margin-top: 10px;
 }
@@ -224,7 +226,7 @@ p {
 .app-list {
   list-style: none;
   padding: 0;
-  margin: 12px 0 0;
+  margin: 2px 0 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -259,7 +261,7 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
 }
@@ -320,7 +322,7 @@ p {
 label {
   display: grid;
   gap: 5px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -338,7 +340,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 9px 10px;
-  font-size: 14px;
+  font-size: 13px;
   background: #fff;
 }
 
@@ -387,7 +389,7 @@ button:hover {
   background: #fff;
   color: var(--brand-strong);
   border: 1px solid #c4d8e2;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   padding: 6px 10px;
 }
@@ -466,12 +468,12 @@ button:hover {
 .store-panel-head small {
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .store-requirement-note {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 
@@ -483,7 +485,7 @@ button:hover {
 }
 
 .store-locale-label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -545,6 +547,22 @@ button:hover {
   min-width: 0;
 }
 
+.hints-toggle-btn {
+  justify-self: end;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #f1f5f7;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  line-height: 1.3;
+}
+
+.hints-toggle-btn:hover {
+  background: #e4ecf0;
+  transform: none;
+}
+
 .store-field {
   display: grid;
   gap: 6px;
@@ -556,9 +574,14 @@ button:hover {
 
 .store-field-hint,
 .store-field-note {
-  display: block;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
+  display: none;
+}
+
+.store-fields.show-hints .store-field-hint,
+.store-fields.show-hints .store-field-note {
+  display: block;
 }
 
 .store-field-hint {
@@ -571,20 +594,20 @@ button:hover {
 
 
 .screenshot-empty {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 10px;
 }
 
 .screenshot-group-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--ink);
   margin-bottom: 6px;
 }
 
 .screenshot-group-label {
-  font-size: 11px;
+  font-size: 10px;
   font-family: "IBM Plex Mono", monospace;
   color: var(--muted);
   margin: 6px 0 4px;
@@ -668,7 +691,7 @@ button:hover {
 .locale-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .locale-table th,
@@ -699,7 +722,7 @@ button:hover {
 .name-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .name-table th,
@@ -721,7 +744,7 @@ button:hover {
 
 .code-box {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #131920;
@@ -747,25 +770,33 @@ button:hover {
   right: 0;
   bottom: 0;
   z-index: 40;
-  padding: 8px 14px 10px;
+  padding: 4px 14px 6px;
   background: #0f1720;
   border-top: 1px solid #22303f;
-  box-shadow: 0 -8px 20px rgba(6, 11, 16, 0.35);
+  box-shadow: 0 -4px 12px rgba(6, 11, 16, 0.25);
+  transition: right 180ms ease;
 }
 
 .console-head {
-  margin-bottom: 6px;
+  margin-bottom: 0;
   color: #d4e8f4;
 }
 
-.console-dock.collapsed .console-head {
-  margin-bottom: 4px;
+.console-head h3 {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.console-dock.changes-open {
+  right: min(380px, 92vw);
 }
 
 .console-dock .ghost-button {
   background: #18242f;
   color: #d4e8f4;
   border: 1px solid #2b3c4d;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .console-line {
@@ -782,13 +813,14 @@ button:hover {
 }
 
 .console-box {
-  min-height: 180px;
-  max-height: 40vh;
+  min-height: 120px;
+  max-height: 30vh;
   resize: vertical;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #131920;
   margin: 0;
+  font-size: 12px;
 }
 
 .changes-drawer-toggle {
@@ -796,31 +828,37 @@ button:hover {
   top: 50%;
   right: 0;
   transform: translateY(-50%);
-  z-index: 46;
-  border-radius: 10px 0 0 10px;
+  z-index: 51;
+  border-radius: 8px 0 0 8px;
   background: #0c4b66;
   color: #fff;
   border: 1px solid #0a3a50;
   border-right: none;
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 10px;
+  transition: right 180ms ease;
+}
+
+.changes-drawer-toggle:hover {
+  transform: translateY(-50%);
+  background: #0a3a50;
 }
 
 .changes-drawer-toggle.open {
-  right: min(420px, 92vw);
+  right: min(380px, 92vw);
 }
 
 .changes-drawer {
   position: fixed;
   top: 0;
   right: 0;
-  bottom: 62px;
-  width: min(420px, 92vw);
+  bottom: 0;
+  width: min(380px, 92vw);
   background: #fffdf8;
   border-left: 1px solid var(--line);
   box-shadow: -14px 0 28px rgba(26, 34, 42, 0.14);
-  z-index: 45;
+  z-index: 50;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   transform: translateX(100%);
@@ -831,12 +869,8 @@ button:hover {
   transform: translateX(0);
 }
 
-.changes-drawer.console-expanded {
-  bottom: 300px;
-}
-
 .changes-drawer-head {
-  padding: 14px 14px 10px;
+  padding: 10px 12px 8px;
   border-bottom: 1px solid #ece5d6;
   display: flex;
   align-items: center;
@@ -844,14 +878,18 @@ button:hover {
   gap: 8px;
 }
 
+.changes-drawer-head h3 {
+  font-size: 12px;
+}
+
 .changes-drawer-head span {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
 }
 
 .changes-drawer-list {
-  padding: 12px 14px;
+  padding: 8px 12px;
   overflow: auto;
 }
 
@@ -860,16 +898,16 @@ button:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .change-item {
   border: 1px solid #e6dfd1;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fff;
-  padding: 10px;
+  padding: 8px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .change-item-head {
@@ -881,12 +919,12 @@ button:hover {
 
 .change-item-head span {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
 }
 
 .change-field {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--brand-strong);
 }
 
@@ -899,7 +937,7 @@ button:hover {
 
 .change-values code {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: 10px;
   background: #f3f7f9;
   border: 1px solid #dce8ee;
   border-radius: 6px;
@@ -909,10 +947,114 @@ button:hover {
 }
 
 .changes-drawer-actions {
-  padding: 10px 14px 12px;
+  padding: 8px 12px 10px;
   border-top: 1px solid #ece5d6;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Generate Translations Dialog */
+.generate-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  width: min(560px, 96vw);
+}
+
+.generate-dialog::backdrop {
+  background: rgba(17, 21, 28, 0.45);
+}
+
+.generate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.generate-select-actions {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.generate-select-actions button {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.generate-locale-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ece5d6;
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px 10px;
+}
+
+.generate-locale-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.generate-locale-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.generate-locale-item label {
+  cursor: pointer;
+  font-size: 12px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink);
+  display: inline;
+}
+
+.generate-prompt-section {
+  margin-top: 12px;
+}
+
+.generate-prompt-section label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.generate-master-prompt {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.generate-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.generate-footer-info {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.generate-footer-actions {
+  display: flex;
   gap: 8px;
 }
 
@@ -938,12 +1080,12 @@ button:hover {
 
   .app-shell {
     grid-template-rows: auto auto minmax(0, 1fr);
-    height: calc(100vh - 80px);
+    height: calc(100vh - 56px);
     padding-right: 0;
   }
 
   .app-shell.console-expanded {
-    height: calc(100vh - 300px);
+    height: calc(100vh - 200px);
   }
 
   .two-col,
@@ -955,15 +1097,11 @@ button:hover {
   }
 
   .changes-drawer-toggle.open {
-    right: min(92vw, 420px);
+    right: min(92vw, 380px);
   }
 
   .changes-drawer {
-    width: min(92vw, 420px);
-  }
-
-  .changes-drawer.console-expanded {
-    bottom: 280px;
+    width: min(92vw, 380px);
   }
 
   .store-locale-row {

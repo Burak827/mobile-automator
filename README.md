@@ -1,10 +1,8 @@
 # Mobile Automator (App Store Connect + Google Play)
 
-CLI to translate and sync store listing text with OpenAI for:
-- App Store Connect (description, promotional text, what's new)
+CLI and web control plane for translating and syncing store listing text with OpenAI for:
+- App Store Connect (name, subtitle, description, promotional text, what's new, keywords)
 - Google Play Console (title, short description, full description)
-
-Also includes a web control plane (API-first, optional UI) with SQLite persistence.
 
 ## Web Control Plane
 
@@ -50,7 +48,8 @@ Run API backend in a second terminal during UI development:
 npm run web:api
 ```
 
-What it provides now:
+### Web Features
+
 - Persistent app configs in SQLite (`WEB_DB_PATH`)
 - Locale matrix for both stores (ASC/Android) in API
 - Naming/metadata overrides per locale (`App Store name`, `App Store keywords`, `Play title`, `iOS bundle display name`)
@@ -58,24 +57,50 @@ What it provides now:
 - iOS name consistency checks and `InfoPlist.strings` generation helper
 - API connectivity tests for ASC and Google Play
 - Remote snapshot + workload analysis (especially for large Play locale sets)
-- Locale sync endpoint that pulls from App Store + Play and writes locales/details to SQLite
-- Locale details browsing endpoints for all synced locales
+- Locale sync: pulls from App Store + Play and writes locales/details to SQLite
+- Locale details browsing for all synced locales
+- Queue-based change management: all changes are queued first, then committed via "Guncelle" button
+- AI translation: generate translations for all locales using OpenAI (Gen iOS / Gen Play buttons)
+- Cross-store copy: copy locale data from iOS to Play Store or Play Store to iOS
+- Apple CFBundleList JSON download for `InfoPlist.strings` generation
+- Locale add/remove/update: manage locale set and apply field-level updates per locale
 
-Key API endpoints:
-- `POST /api/apps/:id/locales/sync` (body: `{ "storeScope": "both" | "app_store" | "play_store" }`)
-- `GET /api/apps/:id/locales` (configured locale matrix)
-- `GET /api/apps/:id/locales/details?store=both|app_store|play_store` (synced locale detail list)
-- `GET /api/apps/:id/locales/details/:store/:locale` (single locale detail)
-- `GET /api/meta` now includes `localeCatalog` entries with support flags:
-  - `{ "locale": "en-US", "iosSupported": true, "androidSupported": true }`
+### Key API Endpoints
 
-Example sync:
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/meta` | Store rules, field limits, locale catalog |
+| `GET` | `/api/apps` | List all apps |
+| `POST` | `/api/apps` | Create a new app |
+| `GET` | `/api/apps/:id` | Get app details |
+| `PUT` | `/api/apps/:id` | Update app config |
+| `DELETE` | `/api/apps/:id` | Delete an app |
+| `GET` | `/api/apps/:id/locales` | Configured locale matrix |
+| `POST` | `/api/apps/:id/locales/sync` | Sync locales from remote stores |
+| `POST` | `/api/apps/:id/locales/apply` | Add/remove/update locale details |
+| `GET` | `/api/apps/:id/locales/details` | All synced locale details |
+| `GET` | `/api/apps/:id/locales/details/:store/:locale` | Single locale detail |
+| `POST` | `/api/apps/:id/generate-translations` | AI translate via NDJSON streaming |
+| `POST` | `/api/apps/:id/copy-cross-store` | Copy data between iOS and Play stores |
+| `GET` | `/api/apps/:id/apple-cfbundle-list` | Download CFBundleList JSON |
+
+#### Locale Sync
 
 ```bash
 curl -X POST http://localhost:8787/api/apps/1/locales/sync \
   -H "Content-Type: application/json" \
   -d '{"storeScope":"both"}'
 ```
+
+#### AI Translation (NDJSON Streaming)
+
+```bash
+curl -N http://localhost:8787/api/apps/1/generate-translations?store=app_store \
+  -X POST
+```
+
+Returns newline-delimited JSON events: `start`, `progress`, `locale_done`, `locale_skip`, `error`, `done`.
 
 Build with static web assets:
 
@@ -161,7 +186,7 @@ Before using `gpc-*` commands:
 2. Create a service account and JSON key.
 3. In Play Console, add that service account email in Users & permissions and grant app permissions for store listing management.
 
-## Commands
+## CLI Commands
 
 `npm run dev` keeps CLI compatibility when arguments are passed:
 
@@ -326,7 +351,7 @@ npm run dev -- gpc-sync \
 - `sync` and `gpc-sync` both support `--strict-limits` to fail instead of skipping over-limit fields.
 - `gpc-sync` defaults to syncing `title`, `shortDescription`, and `fullDescription`. If source fields are empty in Play, use `--fields` or source files to avoid empty updates.
 
-## Store Consistency Rules (verified)
+## Store Consistency Rules
 
 ### Character limits
 
@@ -344,9 +369,9 @@ npm run dev -- gpc-sync \
 
 ### Screenshot requirement check
 
-- App Store: screenshots are required for submission/review per required device sizes.  
+- App Store: screenshots are required for submission/review per required device sizes.
   Source: https://developer.apple.com/help/app-store-connect/reference/screenshot-specifications/
-- Google Play: for publishing, Google Play requires at least 2 screenshots (across supported device types).  
+- Google Play: for publishing, Google Play requires at least 2 screenshots (across supported device types).
   Source: https://support.google.com/googleplay/android-developer/answer/9859152
 
 ### Publish vs draft note

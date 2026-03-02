@@ -138,9 +138,17 @@ function StoreFieldList({
   const values = readStoreFieldValues(store, detail);
   const screenshots = detail?.screenshots;
   const [preview, setPreview] = useState<ScreenshotImage | null>(null);
+  const [showHints, setShowHints] = useState(false);
 
   return (
-    <div className="store-fields">
+    <div className={`store-fields ${showHints ? 'show-hints' : ''}`}>
+      <button
+        type="button"
+        className="hints-toggle-btn"
+        onClick={() => setShowHints((prev) => !prev)}
+      >
+        {showHints ? 'Kuralları Gizle' : 'Kuralları Göster'}
+      </button>
       {keys.map((fieldKey) => {
         const baseValue = values[fieldKey] || '';
         const changeKey = toChangeKey(store, locale, fieldKey);

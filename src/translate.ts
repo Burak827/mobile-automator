@@ -77,6 +77,8 @@ export async function translateWithOpenAI(options: {
   maxLength?: number;
   lengthUnit?: "characters" | "bytes";
   storeName?: string;
+  appTitle?: string;
+  masterPrompt?: string;
 }): Promise<string> {
   const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
   const lengthUnit = options.lengthUnit ?? "characters";
@@ -86,6 +88,12 @@ export async function translateWithOpenAI(options: {
     typeof maxLength === "number" && Number.isFinite(maxLength)
       ? ` The translation must be ${Math.floor(maxLength)} ${lengthUnit} or fewer.`
       : "";
+  const titleContext = options.appTitle
+    ? ` The app is called "${options.appTitle}" in this locale.`
+    : "";
+  const masterHint = options.masterPrompt
+    ? ` Additional instructions: ${options.masterPrompt}`
+    : "";
 
   return requestOpenAI({
     config,
@@ -94,11 +102,12 @@ export async function translateWithOpenAI(options: {
         role: "system",
         content:
           `You are a translation engine for ${store} listing text. ` +
-          "Translate accurately, keep line breaks and formatting, and return only the translated text.",
+          "Translate accurately, keep line breaks and formatting, and return only the translated text." +
+          masterHint,
       },
       {
         role: "user",
-        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}.${lengthHint} Return only the translated text.\n\n${text}`,
+        content: `Translate${fieldHint} from ${sourceLocale} to ${targetLocale}.${lengthHint}${titleContext} Return only the translated text.\n\n${text}`,
       },
     ],
   });
@@ -112,12 +121,16 @@ export async function shortenWithOpenAI(options: {
   maxLength: number;
   lengthUnit?: "characters" | "bytes";
   storeName?: string;
+  masterPrompt?: string;
 }): Promise<string> {
   const { config, targetLocale, text, fieldName, maxLength } = options;
   const lengthUnit = options.lengthUnit ?? "characters";
   const store = options.storeName ?? "App Store";
   const fieldHint = fieldName ? ` for the ${store} ${fieldName}` : "";
   const limit = Math.floor(maxLength);
+  const masterHint = options.masterPrompt
+    ? ` Additional instructions: ${options.masterPrompt}`
+    : "";
 
   return requestOpenAI({
     config,
@@ -126,7 +139,8 @@ export async function shortenWithOpenAI(options: {
         role: "system",
         content:
           `You are a rewriting engine for ${store} listing text. ` +
-          "Shorten while preserving meaning, tone, and formatting. Do not add new info. Return only the shortened text.",
+          "Shorten while preserving meaning, tone, and formatting. Do not add new info. Return only the shortened text." +
+          masterHint,
       },
       {
         role: "user",

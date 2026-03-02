@@ -20,7 +20,6 @@ function formatChangeTitle(change: PendingStoreChange): string {
 
 type Props = {
   isOpen: boolean;
-  isConsoleExpanded: boolean;
   isBusy: boolean;
   changes: PendingStoreChange[];
   onToggle: () => void;
@@ -31,7 +30,6 @@ type Props = {
 
 export default function ChangeQueueDrawer({
   isOpen,
-  isConsoleExpanded,
   isBusy,
   changes,
   onToggle,
@@ -42,9 +40,7 @@ export default function ChangeQueueDrawer({
   const count = Array.isArray(changes) ? changes.length : 0;
   const iosCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'app_store').length : 0;
   const playCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'play_store').length : 0;
-  const drawerClass = `changes-drawer ${isOpen ? 'open' : 'closed'} ${
-    isConsoleExpanded ? 'console-expanded' : 'console-collapsed'
-  }`;
+  const drawerClass = `changes-drawer ${isOpen ? 'open' : 'closed'}`;
 
   return (
     <>
