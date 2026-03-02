@@ -27,6 +27,8 @@ type Props = {
   onClear: () => void;
   onExport: () => void;
   onImport: (text: string) => void;
+  onRemoveChange: (key: string) => void;
+  onNavigateToLocale: (store: StoreId, locale: string) => void;
   onApplyStore?: (store: StoreId) => void;
   onApply: () => void;
 };
@@ -39,6 +41,8 @@ export default function ChangeQueueDrawer({
   onClear,
   onExport,
   onImport,
+  onRemoveChange,
+  onNavigateToLocale,
   onApplyStore,
   onApply,
 }: Props) {
@@ -81,8 +85,23 @@ export default function ChangeQueueDrawer({
                 <li key={entry.key} className="change-item">
                   <div className="change-item-head">
                     <strong>{formatStoreLabel(entry.store)}</strong>
-                    <span>{entry.locale}</span>
+                    <button
+                      type="button"
+                      className="change-item-remove"
+                      title="Bu değişikliği sil"
+                      onClick={() => onRemoveChange(entry.key)}
+                    >
+                      &times;
+                    </button>
                   </div>
+                  <button
+                    type="button"
+                    className="change-item-locale"
+                    title={`${entry.locale} locale'ine git`}
+                    onClick={() => onNavigateToLocale(entry.store, entry.locale)}
+                  >
+                    {entry.locale}
+                  </button>
                   <div className="change-field">{formatChangeTitle(entry)}</div>
                   {entry.kind === 'locale' ? (
                     <div className="change-values">

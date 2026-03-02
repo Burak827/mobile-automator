@@ -218,17 +218,81 @@ function normalizeImportedLocaleToken(locale: string): string {
   return locale.trim().replace(/_/g, '-');
 }
 
+function normalizeLocaleCase(locale: string): string {
+  const parts = normalizeImportedLocaleToken(locale)
+    .split('-')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) return '';
+
+  return parts
+    .map((part, index) => {
+      if (index === 0) return part.toLowerCase();
+      if (part.length === 4) {
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+      }
+      if (part.length === 2 || part.length === 3) {
+        return part.toUpperCase();
+      }
+      return part;
+    })
+    .join('-');
+}
+
 function firstLocaleSegment(locale: string): string {
-  const [segment = ''] = locale.split('-');
+  const [segment = ''] = normalizeLocaleCase(locale).split('-');
   return segment.toLowerCase();
 }
 
 function findLocaleCaseInsensitive(locales: Set<string>, target: string): string | null {
-  const lowerTarget = target.toLowerCase();
+  const lowerTarget = normalizeLocaleCase(target).toLowerCase();
   for (const locale of locales) {
-    if (locale.toLowerCase() === lowerTarget) return locale;
+    if (normalizeLocaleCase(locale).toLowerCase() === lowerTarget) return locale;
   }
   return null;
+}
+
+function buildRnLocaleExportKeyMap(locales: string[]): Map<string, string> {
+  const normalizedByLocale = new Map<string, string>();
+  for (const locale of locales) {
+    normalizedByLocale.set(locale, normalizeLocaleCase(locale) || locale);
+  }
+
+  const languageCount = new Map<string, number>();
+  for (const locale of locales) {
+    const normalized = normalizedByLocale.get(locale) || locale;
+    const lang = firstLocaleSegment(normalized);
+    languageCount.set(lang, (languageCount.get(lang) ?? 0) + 1);
+  }
+
+  const normalizedSet = new Set(Array.from(normalizedByLocale.values()));
+  const keyByLocale = new Map<string, string>();
+
+  for (const locale of locales) {
+    const normalized = normalizedByLocale.get(locale) || locale;
+    const hasSubtag = normalized.includes('-');
+    const lang = firstLocaleSegment(normalized);
+    const canShorten =
+      hasSubtag &&
+      (languageCount.get(lang) ?? 0) === 1 &&
+      !normalizedSet.has(lang);
+    keyByLocale.set(locale, canShorten ? lang : normalized);
+  }
+
+  const keyGroups = new Map<string, string[]>();
+  for (const [locale, key] of keyByLocale.entries()) {
+    if (!keyGroups.has(key)) keyGroups.set(key, []);
+    keyGroups.get(key)!.push(locale);
+  }
+
+  for (const group of keyGroups.values()) {
+    if (group.length <= 1) continue;
+    for (const locale of group) {
+      keyByLocale.set(locale, normalizedByLocale.get(locale) || locale);
+    }
+  }
+
+  return keyByLocale;
 }
 
 function resolveImportedLocaleForStore(
@@ -236,25 +300,32 @@ function resolveImportedLocaleForStore(
   existingLocales: Set<string>,
   supportedLocales: Set<string>
 ): string {
-  const normalized = normalizeImportedLocaleToken(rawLocale);
+  const normalized = normalizeLocaleCase(rawLocale);
   if (!normalized) return '';
 
   const exactExisting = findLocaleCaseInsensitive(existingLocales, normalized);
   if (exactExisting) return exactExisting;
 
+  const isLanguageOnly = !normalized.includes('-');
+  if (isLanguageOnly) {
+    const targetLang = firstLocaleSegment(normalized);
+    const existingLangMatches = Array.from(existingLocales).filter(
+      (locale) => firstLocaleSegment(locale) === targetLang
+    );
+    if (existingLangMatches.length === 1) return existingLangMatches[0];
+  }
+
   const exactSupported = findLocaleCaseInsensitive(supportedLocales, normalized);
   if (exactSupported) return exactSupported;
 
-  const targetLang = firstLocaleSegment(normalized);
-  const existingLangMatches = Array.from(existingLocales).filter(
-    (locale) => firstLocaleSegment(locale) === targetLang
-  );
-  if (existingLangMatches.length === 1) return existingLangMatches[0];
-
-  const supportedLangMatches = Array.from(supportedLocales).filter(
-    (locale) => firstLocaleSegment(locale) === targetLang
-  );
-  if (supportedLangMatches.length === 1) return supportedLangMatches[0];
+  if (isLanguageOnly) {
+    const targetLang = firstLocaleSegment(normalized);
+    const supportedLangMatches = Array.from(supportedLocales).filter(
+      (locale) => firstLocaleSegment(locale) === targetLang
+    );
+    if (supportedLangMatches.length === 1) return supportedLangMatches[0];
+    if (supportedLangMatches.length > 1) return '';
+  }
 
   return normalized;
 }
@@ -1221,6 +1292,7 @@ export default function App() {
     try {
       const titleMap = await loadStoreTitleMap(selectedAppId, store);
       const localePayload: NonNullable<RnLocalePayload['locales']> = {};
+      const localeKeyMap = buildRnLocaleExportKeyMap(locales);
 
       for (const locale of locales) {
         const pendingKey = toStoreChangeKey(store, locale, fieldKey);
@@ -1231,8 +1303,8 @@ export default function App() {
             : '';
         const existingTitle = titleMap.get(locale)?.trim() || '';
         const appName = pendingTitle || existingTitle;
-
-        localePayload[locale] = {
+        const exportLocaleKey = localeKeyMap.get(locale) || normalizeLocaleCase(locale) || locale;
+        localePayload[exportLocaleKey] = {
           app_name: appName,
           CFBundleDisplayName: appName,
           CFBundleName: appName,
@@ -1346,12 +1418,7 @@ export default function App() {
   );
 
   const handleQueueLocaleChange = useCallback(
-    (
-      store: StoreId,
-      locale: string,
-      action: 'add' | 'remove',
-      options?: { forceUnsupportedAdd?: boolean }
-    ) => {
+    (store: StoreId, locale: string, action: 'add' | 'remove') => {
       const targetLocale = locale.trim();
       if (!targetLocale) return;
 
@@ -1360,7 +1427,7 @@ export default function App() {
           entry.locale === targetLocale &&
           (store === 'app_store' ? entry.iosSupported : entry.androidSupported)
       );
-      if (action === 'add' && !isSupportedForStore && !options?.forceUnsupportedAdd) {
+      if (action === 'add' && !isSupportedForStore) {
         pushStatus(
           `${store === 'app_store' ? 'iOS' : 'Play Store'} için desteklenmeyen locale: ${targetLocale}`
         );
@@ -1542,6 +1609,7 @@ export default function App() {
         let queuedLocaleAdds = 0;
         let queuedFieldUpdates = 0;
         let skippedInvalid = 0;
+        let skippedUnsupported = 0;
 
         for (const [rawLocale, rawValue] of localeEntries) {
           const sourceLocale = typeof rawLocale === 'string' ? rawLocale.trim() : '';
@@ -1556,6 +1624,10 @@ export default function App() {
           );
           if (!locale) {
             skippedInvalid += 1;
+            continue;
+          }
+          if (!supportedLocaleSet.has(locale)) {
+            skippedUnsupported += 1;
             continue;
           }
 
@@ -1574,7 +1646,7 @@ export default function App() {
               : titleMap.get(locale) || '';
 
           if (!existsInWeb) {
-            handleQueueLocaleChange(store, locale, 'add', { forceUnsupportedAdd: true });
+            handleQueueLocaleChange(store, locale, 'add');
             queuedLocaleAdds += 1;
             existingLocaleSet.add(locale);
           }
@@ -1602,6 +1674,11 @@ export default function App() {
 
         if (skippedInvalid > 0) {
           pushStatus(`RN locales import: ${skippedInvalid} geçersiz locale satırı atlandı.`);
+        }
+        if (skippedUnsupported > 0) {
+          pushStatus(
+            `RN locales import: ${skippedUnsupported} locale ${storeLabel} destek listesinde olmadığı için atlandı.`
+          );
         }
       } catch (error) {
         pushStatus(`RN locales import hatası: ${error instanceof Error ? error.message : String(error)}`);
@@ -1698,6 +1775,25 @@ export default function App() {
   const handleClearPendingChanges = useCallback(() => {
     setPendingStoreChanges({});
   }, []);
+
+  const handleRemovePendingChange = useCallback((key: string) => {
+    setPendingStoreChanges((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const handleNavigateToLocale = useCallback(
+    (store: StoreId, locale: string) => {
+      if (store === 'app_store') {
+        void handleSelectIosLocale(locale);
+      } else {
+        void handleSelectPlayLocale(locale);
+      }
+    },
+    [handleSelectIosLocale, handleSelectPlayLocale]
+  );
 
   const handleApplyPendingChanges = useCallback(
     async (storeFilter?: StoreId) => {
@@ -1979,6 +2075,8 @@ export default function App() {
         onClear={handleClearPendingChanges}
         onExport={handleExportChangeQueue}
         onImport={handleImportChangeQueue}
+        onRemoveChange={handleRemovePendingChange}
+        onNavigateToLocale={handleNavigateToLocale}
         onApplyStore={handleApplyPendingChanges}
         onApply={() => handleApplyPendingChanges()}
       />
