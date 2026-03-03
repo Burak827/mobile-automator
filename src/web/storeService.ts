@@ -1,4 +1,4 @@
-import { AscClient } from "../ascClient.js";
+import { AscClient, type QueryValue } from "../ascClient.js";
 import {
   AppStoreVersionAttributes,
   AppScreenshotSetAttributes,
@@ -65,6 +65,51 @@ export type PlayStoreSnapshot = {
   packageName: string;
   editId: string;
   locales: PlayStoreLocaleSnapshot[];
+  fetchedAt: string;
+};
+
+export type AppStoreIapLocalizationSnapshot = {
+  locale: string;
+  name?: string;
+  description?: string;
+  state?: string;
+};
+
+export type AppStoreIapSnapshot = {
+  productId: string;
+  referenceName?: string;
+  inAppPurchaseType?: string;
+  state?: string;
+  familySharable?: boolean;
+  localizations: AppStoreIapLocalizationSnapshot[];
+};
+
+export type AppStoreIapCatalog = {
+  store: "app_store";
+  appId: string;
+  items: AppStoreIapSnapshot[];
+  fetchedAt: string;
+};
+
+export type PlayStoreIapListingSnapshot = {
+  locale: string;
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+export type PlayStoreIapSnapshot = {
+  productId: string;
+  status?: string;
+  purchaseType?: string;
+  defaultLanguage?: string;
+  listings: PlayStoreIapListingSnapshot[];
+};
+
+export type PlayStoreIapCatalog = {
+  store: "play_store";
+  packageName: string;
+  items: PlayStoreIapSnapshot[];
   fetchedAt: string;
 };
 
@@ -216,6 +261,108 @@ type GpcListingsListResponse = {
   }>;
 };
 
+type AscInAppPurchasesV2Response = {
+  data?: Array<{
+    id: string;
+    attributes?: {
+      productId?: string;
+      referenceName?: string;
+      inAppPurchaseType?: string;
+      state?: string;
+      familySharable?: boolean;
+    };
+    relationships?: {
+      inAppPurchaseLocalizations?: {
+        links?: {
+          related?: string;
+        };
+      };
+    };
+  }>;
+  included?: Array<{
+    id: string;
+    type?: string;
+    attributes?: {
+      locale?: string;
+      name?: string;
+      description?: string;
+      state?: string;
+    };
+    relationships?: {
+      inAppPurchaseV2?: {
+        data?: { id?: string };
+      };
+      inAppPurchase?: {
+        data?: { id?: string };
+      };
+    };
+  }>;
+  links?: {
+    next?: string;
+  };
+};
+
+type GpcOneTimeProductListing = {
+  languageCode?: string;
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+type GpcMapBasedIapListing = {
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+type GpcOneTimeProduct = {
+  productId?: string;
+  listings?: GpcOneTimeProductListing[] | Record<string, GpcMapBasedIapListing>;
+  purchaseOptions?: Array<{
+    state?: string;
+  }>;
+};
+
+type GpcOneTimeProductsListResponse = {
+  oneTimeProducts?: GpcOneTimeProduct[];
+  nextPageToken?: string;
+};
+
+type GpcSubscriptionListing = {
+  languageCode?: string;
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+type GpcSubscription = {
+  productId?: string;
+  listings?: GpcSubscriptionListing[] | Record<string, GpcMapBasedIapListing>;
+  basePlans?: Array<{
+    state?: string;
+  }>;
+};
+
+type GpcSubscriptionsListResponse = {
+  subscriptions?: GpcSubscription[];
+  nextPageToken?: string;
+};
+
+type AscIapLocalizationListResponse = {
+  data?: Array<{
+    id: string;
+    attributes?: {
+      locale?: string;
+      name?: string;
+      description?: string;
+      state?: string;
+    };
+  }>;
+  links?: {
+    next?: string;
+  };
+};
+
 export class StoreApiService {
   private resolveAscClient(): AscClient {
     const env = loadEnvConfig();
@@ -238,6 +385,138 @@ export class StoreApiService {
       "GPC_SERVICE_ACCOUNT_KEY_PATH"
     );
     return new GpcClient({ serviceAccountKeyPath });
+  }
+
+  private toAscRelativePath(urlOrPath: string): string {
+    const raw = (urlOrPath || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("/")) return raw;
+
+    try {
+      const parsed = new URL(raw);
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return raw.startsWith("?") ? `/${raw}` : `/${raw.replace(/^\/+/, "")}`;
+    }
+  }
+
+  private async fetchAscPaginated<TData, TIncluded = never>(options: {
+    client: AscClient;
+    path: string;
+    query?: Record<string, QueryValue>;
+    maxPages?: number;
+  }): Promise<{
+    data: TData[];
+    included: TIncluded[];
+  }> {
+    const allData: TData[] = [];
+    const allIncluded: TIncluded[] = [];
+    const seenPaths = new Set<string>();
+    const maxPages = options.maxPages ?? 100;
+
+    let currentPath = options.path;
+    let currentQuery: Record<string, QueryValue> | undefined = options.query;
+    for (let page = 0; page < maxPages; page += 1) {
+      const fingerprint =
+        page === 0
+          ? JSON.stringify([currentPath, currentQuery ?? null])
+          : JSON.stringify([currentPath, null]);
+      if (seenPaths.has(fingerprint)) break;
+      seenPaths.add(fingerprint);
+
+      const payload = await options.client.get<{
+        data?: TData[];
+        included?: TIncluded[];
+        links?: { next?: string };
+      }>(currentPath, currentQuery);
+
+      if (Array.isArray(payload.data)) {
+        allData.push(...payload.data);
+      }
+      if (Array.isArray(payload.included)) {
+        allIncluded.push(...payload.included);
+      }
+
+      const next = payload.links?.next?.trim();
+      if (!next) break;
+      currentPath = this.toAscRelativePath(next);
+      currentQuery = undefined;
+    }
+
+    return { data: allData, included: allIncluded };
+  }
+
+  private mergeAppStoreIapLocalizations(
+    ...groups: AppStoreIapLocalizationSnapshot[][]
+  ): AppStoreIapLocalizationSnapshot[] {
+    const byLocale = new Map<string, AppStoreIapLocalizationSnapshot>();
+    const prefer = (incoming?: string, current?: string): string | undefined => {
+      const next = incoming?.trim();
+      if (next) return next;
+      const prev = current?.trim();
+      return prev || undefined;
+    };
+
+    for (const group of groups) {
+      for (const item of group) {
+        const locale = toCanonical(item.locale || "");
+        if (!locale) continue;
+        const existing = byLocale.get(locale);
+        if (!existing) {
+          byLocale.set(locale, {
+            locale,
+            name: prefer(item.name),
+            description: prefer(item.description),
+            state: prefer(item.state),
+          });
+          continue;
+        }
+
+        byLocale.set(locale, {
+          locale,
+          name: prefer(item.name, existing.name),
+          description: prefer(item.description, existing.description),
+          state: prefer(item.state, existing.state),
+        });
+      }
+    }
+
+    return Array.from(byLocale.values()).sort((a, b) => a.locale.localeCompare(b.locale));
+  }
+
+  private async fetchAscIapLocalizationsFromRelated(
+    client: AscClient,
+    relatedLink?: string
+  ): Promise<AppStoreIapLocalizationSnapshot[]> {
+    if (!relatedLink) return [];
+
+    const path = this.toAscRelativePath(relatedLink);
+    if (!path) return [];
+
+    const payload = await this.fetchAscPaginated<
+      NonNullable<AscIapLocalizationListResponse["data"]>[number]
+    >({
+      client,
+      path,
+      query: {
+        "fields[inAppPurchaseLocalizations]": ["locale", "name", "description", "state"],
+        limit: 200,
+      },
+    });
+
+    const rows: AppStoreIapLocalizationSnapshot[] = [];
+    for (const item of payload.data) {
+      const locale = toCanonical(item.attributes?.locale ?? "");
+      if (!locale) continue;
+      rows.push({
+        locale,
+        name: item.attributes?.name,
+        description: item.attributes?.description,
+        state: item.attributes?.state,
+      });
+    }
+
+    return this.mergeAppStoreIapLocalizations(rows);
   }
 
   private async resolveLatestAscVersion(
@@ -605,6 +884,270 @@ export class StoreApiService {
         // Ignore cleanup errors during snapshot fetch.
       }
     }
+  }
+
+  async fetchAppStoreIapCatalog(app: AppRecord): Promise<AppStoreIapCatalog> {
+    const ascAppId = app.ascAppId;
+    if (!ascAppId) {
+      throw new Error("Cannot fetch App Store IAP catalog: ascAppId is missing.");
+    }
+
+    const client = this.resolveAscClient();
+
+    let iapData: NonNullable<AscInAppPurchasesV2Response["data"]>;
+    let iapIncluded: NonNullable<AscInAppPurchasesV2Response["included"]>;
+    try {
+      const payload = await this.fetchAscPaginated<
+        NonNullable<AscInAppPurchasesV2Response["data"]>[number],
+        NonNullable<AscInAppPurchasesV2Response["included"]>[number]
+      >({
+        client,
+        path: `/v1/apps/${ascAppId}/inAppPurchasesV2`,
+        query: {
+          "fields[inAppPurchaseLocalizations]": ["locale", "name", "description", "state"],
+          include: ["inAppPurchaseLocalizations"],
+          limit: 200,
+        },
+      });
+      iapData = payload.data;
+      iapIncluded = payload.included;
+    } catch {
+      const payload = await this.fetchAscPaginated<
+        NonNullable<AscInAppPurchasesV2Response["data"]>[number],
+        NonNullable<AscInAppPurchasesV2Response["included"]>[number]
+      >({
+        client,
+        path: `/v1/apps/${ascAppId}/inAppPurchasesV2`,
+        query: { limit: 200 },
+      });
+      iapData = payload.data;
+      iapIncluded = payload.included;
+    }
+
+    const localizationByPurchaseId = new Map<string, AppStoreIapLocalizationSnapshot[]>();
+    for (const item of iapIncluded ?? []) {
+      const rawLocale = item.attributes?.locale;
+      if (!rawLocale) continue;
+
+      const parentId =
+        item.relationships?.inAppPurchaseV2?.data?.id ??
+        item.relationships?.inAppPurchase?.data?.id;
+      if (!parentId) continue;
+
+      if (!localizationByPurchaseId.has(parentId)) {
+        localizationByPurchaseId.set(parentId, []);
+      }
+
+      localizationByPurchaseId.get(parentId)!.push({
+        locale: toCanonical(rawLocale),
+        name: item.attributes?.name,
+        description: item.attributes?.description,
+        state: item.attributes?.state,
+      });
+    }
+
+    const items: AppStoreIapSnapshot[] = [];
+    for (const item of iapData ?? []) {
+      const productId = item.attributes?.productId?.trim() || "";
+      if (!productId) continue;
+
+      const baseLocalizations = localizationByPurchaseId.get(item.id) ?? [];
+      let relatedLocalizations: AppStoreIapLocalizationSnapshot[] = [];
+
+      const relatedLink = item.relationships?.inAppPurchaseLocalizations?.links?.related;
+      if (relatedLink) {
+        try {
+          relatedLocalizations = await this.fetchAscIapLocalizationsFromRelated(client, relatedLink);
+        } catch {
+          relatedLocalizations = [];
+        }
+      }
+
+      const localizations = this.mergeAppStoreIapLocalizations(
+        baseLocalizations,
+        relatedLocalizations
+      );
+
+      items.push({
+        productId,
+        referenceName: item.attributes?.referenceName,
+        inAppPurchaseType: item.attributes?.inAppPurchaseType,
+        state: item.attributes?.state,
+        familySharable: item.attributes?.familySharable,
+        localizations,
+      });
+    }
+
+    items.sort((a, b) => a.productId.localeCompare(b.productId));
+
+    return {
+      store: "app_store",
+      appId: ascAppId,
+      items,
+      fetchedAt: nowIso(),
+    };
+  }
+
+  async fetchPlayStoreIapCatalog(app: AppRecord): Promise<PlayStoreIapCatalog> {
+    const packageName = app.androidPackageName;
+    if (!packageName) {
+      throw new Error("Cannot fetch Play IAP catalog: androidPackageName is missing.");
+    }
+
+    const client = this.resolveGpcClient();
+    const byProductId = new Map<string, PlayStoreIapSnapshot>();
+
+    const parseListings = (
+      rawListings:
+        | Array<GpcOneTimeProductListing | GpcSubscriptionListing>
+        | Record<string, GpcMapBasedIapListing>
+        | undefined
+    ): PlayStoreIapListingSnapshot[] => {
+      const byLocale = new Map<string, PlayStoreIapListingSnapshot>();
+
+      const upsert = (localeRaw: string, listing: GpcMapBasedIapListing): void => {
+        const locale = toCanonical(localeRaw);
+        if (!locale) return;
+        const existing = byLocale.get(locale);
+        const next: PlayStoreIapListingSnapshot = {
+          locale,
+          title: listing.title?.trim() || existing?.title,
+          description: listing.description?.trim() || existing?.description,
+          benefits: Array.isArray(listing.benefits)
+            ? listing.benefits.filter((entry): entry is string => typeof entry === "string")
+            : existing?.benefits,
+        };
+        byLocale.set(locale, next);
+      };
+
+      if (Array.isArray(rawListings)) {
+        for (const listing of rawListings) {
+          upsert(listing.languageCode ?? "", listing);
+        }
+      } else if (rawListings && typeof rawListings === "object") {
+        for (const [locale, listing] of Object.entries(rawListings)) {
+          upsert(locale, listing ?? {});
+        }
+      }
+
+      return Array.from(byLocale.values()).sort((a, b) => a.locale.localeCompare(b.locale));
+    };
+
+    const mergeListings = (
+      base: PlayStoreIapListingSnapshot[],
+      incoming: PlayStoreIapListingSnapshot[]
+    ): PlayStoreIapListingSnapshot[] => {
+      const byLocale = new Map<string, PlayStoreIapListingSnapshot>();
+      for (const entry of [...base, ...incoming]) {
+        const locale = toCanonical(entry.locale);
+        if (!locale) continue;
+        const existing = byLocale.get(locale);
+        byLocale.set(locale, {
+          locale,
+          title: entry.title || existing?.title,
+          description: entry.description || existing?.description,
+          benefits: entry.benefits ?? existing?.benefits,
+        });
+      }
+      return Array.from(byLocale.values()).sort((a, b) => a.locale.localeCompare(b.locale));
+    };
+
+    const fetchAllOneTimeProducts = async (): Promise<void> => {
+      const seenPageTokens = new Set<string>();
+      let currentPageToken: string | undefined;
+
+      while (true) {
+        if (currentPageToken && seenPageTokens.has(currentPageToken)) break;
+        if (currentPageToken) seenPageTokens.add(currentPageToken);
+
+        const search = new URLSearchParams();
+        search.set("pageSize", "1000");
+        if (currentPageToken) search.set("pageToken", currentPageToken);
+
+        const payload = await client.get<GpcOneTimeProductsListResponse>(
+          `/androidpublisher/v3/applications/${packageName}/oneTimeProducts?${search.toString()}`
+        );
+
+        for (const item of payload.oneTimeProducts ?? []) {
+          const productId = (item.productId ?? "").trim();
+          if (!productId) continue;
+
+          const listings = parseListings(item.listings ?? []);
+          const states = unique(
+            (item.purchaseOptions ?? [])
+              .map((purchaseOption) => purchaseOption.state?.trim())
+              .filter((state): state is string => Boolean(state))
+          );
+
+          const existing = byProductId.get(productId);
+          byProductId.set(productId, {
+            productId,
+            status: states.length > 0 ? states.join(", ") : existing?.status,
+            purchaseType: "one_time",
+            defaultLanguage: existing?.defaultLanguage ?? listings[0]?.locale,
+            listings: mergeListings(existing?.listings ?? [], listings),
+          });
+        }
+
+        const nextPageToken = payload.nextPageToken?.trim();
+        if (!nextPageToken) break;
+        currentPageToken = nextPageToken;
+      }
+    };
+
+    const fetchAllSubscriptions = async (): Promise<void> => {
+      const seenPageTokens = new Set<string>();
+      let currentPageToken: string | undefined;
+
+      while (true) {
+        if (currentPageToken && seenPageTokens.has(currentPageToken)) break;
+        if (currentPageToken) seenPageTokens.add(currentPageToken);
+
+        const search = new URLSearchParams();
+        search.set("pageSize", "1000");
+        if (currentPageToken) search.set("pageToken", currentPageToken);
+
+        const payload = await client.get<GpcSubscriptionsListResponse>(
+          `/androidpublisher/v3/applications/${packageName}/subscriptions?${search.toString()}`
+        );
+
+        for (const item of payload.subscriptions ?? []) {
+          const productId = (item.productId ?? "").trim();
+          if (!productId) continue;
+
+          const listings = parseListings(item.listings ?? []);
+          const states = unique(
+            (item.basePlans ?? [])
+              .map((basePlan) => basePlan.state?.trim())
+              .filter((state): state is string => Boolean(state))
+          );
+
+          const existing = byProductId.get(productId);
+          byProductId.set(productId, {
+            productId,
+            status: states.length > 0 ? states.join(", ") : existing?.status,
+            purchaseType: "subscription",
+            defaultLanguage: existing?.defaultLanguage ?? listings[0]?.locale,
+            listings: mergeListings(existing?.listings ?? [], listings),
+          });
+        }
+
+        const nextPageToken = payload.nextPageToken?.trim();
+        if (!nextPageToken) break;
+        currentPageToken = nextPageToken;
+      }
+    };
+
+    await Promise.all([fetchAllOneTimeProducts(), fetchAllSubscriptions()]);
+
+    const items = Array.from(byProductId.values()).sort((a, b) => a.productId.localeCompare(b.productId));
+
+    return {
+      store: "play_store",
+      packageName,
+      items,
+      fetchedAt: nowIso(),
+    };
   }
 
   async computeWorkload(options: {

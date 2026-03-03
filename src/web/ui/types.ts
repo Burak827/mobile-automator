@@ -135,6 +135,51 @@ export type StoreLocalesPayload = {
   playStoreLocales: string[];
 };
 
+export type AppStoreIapDetail = {
+  productId: string;
+  referenceName?: string;
+  inAppPurchaseType?: string;
+  state?: string;
+  familySharable?: boolean;
+  localizations?: Array<{
+    locale: string;
+    name?: string;
+    description?: string;
+    state?: string;
+  }>;
+};
+
+export type PlayStoreIapDetail = {
+  productId: string;
+  status?: string;
+  purchaseType?: string;
+  defaultLanguage?: string;
+  listings?: Array<{
+    locale: string;
+    title?: string;
+    description?: string;
+    benefits?: string[];
+  }>;
+};
+
+export type StoreIapEntry = {
+  appId: number;
+  store: StoreId;
+  productId: string;
+  syncedAt: string;
+  detail?: AppStoreIapDetail | PlayStoreIapDetail;
+};
+
+export type IapListPayload = {
+  appId: number;
+  appStoreIaps: StoreIapEntry[];
+  playStoreIaps: StoreIapEntry[];
+  counts?: {
+    appStore: number;
+    playStore: number;
+  };
+};
+
 export type StoreLocaleDetailPayload = {
   appId: number;
   store: StoreId;
@@ -169,9 +214,22 @@ export type PendingStoreLocaleChange = {
   action: "add" | "remove";
 };
 
+export type PendingStoreIapFieldChange = {
+  kind: "iap_field";
+  key: string;
+  store: StoreId;
+  productId: string;
+  iapType?: string;
+  locale: string;
+  field: string;
+  oldValue: string;
+  newValue: string;
+};
+
 export type PendingStoreChange =
   | PendingStoreFieldChange
-  | PendingStoreLocaleChange;
+  | PendingStoreLocaleChange
+  | PendingStoreIapFieldChange;
 
 export type PendingStoreChangeMap = Record<string, PendingStoreChange>;
 export type PendingValueMap = Record<string, string>;
@@ -189,4 +247,16 @@ export type PlayStorePanelState = StorePanelState<PlayStoreLocaleDetail | null>;
 
 export type SyncResponse = {
   errors?: Array<{ store: StoreId; message: string }>;
+  appStore?: {
+    synced?: boolean;
+    iapCount?: number;
+    iapSynced?: boolean;
+    iapError?: string;
+  };
+  playStore?: {
+    synced?: boolean;
+    iapCount?: number;
+    iapSynced?: boolean;
+    iapError?: string;
+  };
 };

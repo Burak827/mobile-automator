@@ -29,6 +29,7 @@ import {
   iosToPlayLocale,
   LOCALE_CATALOG,
   playToIosLocale,
+  toCanonical,
 } from "./localeCatalog.js";
 import {
   translateWithOpenAI,
@@ -271,6 +272,14 @@ function buildPlayStoreDetailEntries(snapshot: PlayStoreSnapshot): Array<{
   }));
 }
 
+function parseIapDetailJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -419,6 +428,45 @@ app.get("/api/apps/:id/locales", (req, res, next) => {
   }
 });
 
+app.get("/api/apps/:id/iaps", (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    mustGetApp(appId);
+
+    const rows = repo.listStoreIaps(appId);
+    const appStoreIaps = rows
+      .filter((row) => row.store === "app_store")
+      .map((row) => ({
+        appId: row.appId,
+        store: row.store,
+        productId: row.productId,
+        syncedAt: row.syncedAt,
+        detail: parseIapDetailJson(row.detailJson),
+      }));
+    const playStoreIaps = rows
+      .filter((row) => row.store === "play_store")
+      .map((row) => ({
+        appId: row.appId,
+        store: row.store,
+        productId: row.productId,
+        syncedAt: row.syncedAt,
+        detail: parseIapDetailJson(row.detailJson),
+      }));
+
+    res.json({
+      appId,
+      appStoreIaps,
+      playStoreIaps,
+      counts: {
+        appStore: appStoreIaps.length,
+        playStore: playStoreIaps.length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put("/api/apps/:id/locales", (req, res, next) => {
   try {
     const appId = parseId(req.params.id);
@@ -483,11 +531,31 @@ app.post("/api/apps/:id/locales/sync", async (req, res, next) => {
         repo.replaceStoreLocales(appId, "app_store", locales);
         const detailEntries = buildAppStoreDetailEntries(snapshot);
         repo.replaceStoreLocaleDetails(appId, "app_store", detailEntries);
+        let iapCount = 0;
+        let iapError: string | undefined;
+        try {
+          const iapCatalog = await storeApi.fetchAppStoreIapCatalog(appRow);
+          const iapRows = repo.replaceStoreIaps(
+            appId,
+            "app_store",
+            iapCatalog.items.map((item) => ({
+              productId: item.productId,
+              detail: item,
+              syncedAt: iapCatalog.fetchedAt,
+            }))
+          );
+          iapCount = iapRows.length;
+        } catch (error) {
+          iapError = error instanceof Error ? error.message : String(error);
+        }
 
         payload.appStore = {
           synced: true,
           localeCount: locales.length,
           detailCount: detailEntries.length,
+          iapCount,
+          iapSynced: !iapError,
+          iapError,
           appId: snapshot.appId,
           versionId: snapshot.versionId,
           versionString: snapshot.versionString,
@@ -508,11 +576,31 @@ app.post("/api/apps/:id/locales/sync", async (req, res, next) => {
         repo.replaceStoreLocales(appId, "play_store", locales);
         const detailEntries = buildPlayStoreDetailEntries(snapshot);
         repo.replaceStoreLocaleDetails(appId, "play_store", detailEntries);
+        let iapCount = 0;
+        let iapError: string | undefined;
+        try {
+          const iapCatalog = await storeApi.fetchPlayStoreIapCatalog(appRow);
+          const iapRows = repo.replaceStoreIaps(
+            appId,
+            "play_store",
+            iapCatalog.items.map((item) => ({
+              productId: item.productId,
+              detail: item,
+              syncedAt: iapCatalog.fetchedAt,
+            }))
+          );
+          iapCount = iapRows.length;
+        } catch (error) {
+          iapError = error instanceof Error ? error.message : String(error);
+        }
 
         payload.playStore = {
           synced: true,
           localeCount: locales.length,
           detailCount: detailEntries.length,
+          iapCount,
+          iapSynced: !iapError,
+          iapError,
           packageName: snapshot.packageName,
           fetchedAt: snapshot.fetchedAt,
         };
@@ -1506,6 +1594,512 @@ async function verifyWithRetry(
   }
   throw lastError;
 }
+
+type AppStoreIapLocalizationLike = {
+  locale: string;
+  name?: string;
+  description?: string;
+};
+
+type AppStoreIapDetailLike = {
+  productId: string;
+  inAppPurchaseType?: string;
+  localizations: AppStoreIapLocalizationLike[];
+};
+
+type PlayStoreIapListingLike = {
+  locale: string;
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+type PlayStoreIapDetailLike = {
+  productId: string;
+  purchaseType?: string;
+  listings: PlayStoreIapListingLike[];
+};
+
+function normalizeLocaleForMatch(locale: string): string {
+  return toCanonical(locale || "").toLowerCase();
+}
+
+function localeLanguage(locale: string): string {
+  const normalized = normalizeLocaleForMatch(locale);
+  return normalized.split("-")[0] ?? "";
+}
+
+function findLocaleEntry<T extends { locale: string }>(entries: T[], locale: string): T | undefined {
+  const target = normalizeLocaleForMatch(locale);
+  if (!target) return undefined;
+
+  const exact = entries.find((entry) => normalizeLocaleForMatch(entry.locale) === target);
+  if (exact) return exact;
+
+  const targetLang = localeLanguage(target);
+  if (!targetLang) return undefined;
+  const languageMatches = entries.filter((entry) => localeLanguage(entry.locale) === targetLang);
+  if (languageMatches.length === 1) return languageMatches[0];
+  return undefined;
+}
+
+function parseAppStoreIapDetail(detail: unknown): AppStoreIapDetailLike | null {
+  if (!detail || typeof detail !== "object") return null;
+  const row = detail as Record<string, unknown>;
+  const productId = typeof row.productId === "string" ? row.productId.trim() : "";
+  if (!productId) return null;
+
+  const localizationsRaw = Array.isArray(row.localizations) ? row.localizations : [];
+  const localizations: AppStoreIapLocalizationLike[] = [];
+  for (const item of localizationsRaw) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    const locale = typeof entry.locale === "string" ? toCanonical(entry.locale) : "";
+    if (!locale) continue;
+    localizations.push({
+      locale,
+      name: typeof entry.name === "string" ? entry.name : undefined,
+      description: typeof entry.description === "string" ? entry.description : undefined,
+    });
+  }
+
+  return {
+    productId,
+    inAppPurchaseType: typeof row.inAppPurchaseType === "string" ? row.inAppPurchaseType : undefined,
+    localizations,
+  };
+}
+
+function parsePlayStoreIapDetail(detail: unknown): PlayStoreIapDetailLike | null {
+  if (!detail || typeof detail !== "object") return null;
+  const row = detail as Record<string, unknown>;
+  const productId = typeof row.productId === "string" ? row.productId.trim() : "";
+  if (!productId) return null;
+
+  const listingsRaw = Array.isArray(row.listings) ? row.listings : [];
+  const listings: PlayStoreIapListingLike[] = [];
+  for (const item of listingsRaw) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Record<string, unknown>;
+    const locale = typeof entry.locale === "string" ? toCanonical(entry.locale) : "";
+    if (!locale) continue;
+    listings.push({
+      locale,
+      title: typeof entry.title === "string" ? entry.title : undefined,
+      description: typeof entry.description === "string" ? entry.description : undefined,
+      benefits: Array.isArray(entry.benefits)
+        ? entry.benefits
+            .filter((value): value is string => typeof value === "string")
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0)
+        : undefined,
+    });
+  }
+
+  return {
+    productId,
+    purchaseType: typeof row.purchaseType === "string" ? row.purchaseType : undefined,
+    listings,
+  };
+}
+
+app.post("/api/apps/:id/generate-iap-translations", async (req, res, next) => {
+  try {
+    const appId = parseId(req.params.id);
+    const appRow = mustGetApp(appId);
+    const store = parseStoreId(
+      (typeof req.query.store === "string" ? req.query.store : undefined) ??
+        (typeof (req.body as Record<string, unknown>)?.store === "string"
+          ? ((req.body as Record<string, unknown>).store as string)
+          : "")
+    );
+    const sourceLocale = toCanonical(appRow.sourceLocale || "en-US") || "en-US";
+
+    const openaiApiKey = env.openaiApiKey;
+    const openaiModel = env.openaiModel ?? "gpt-4o-mini";
+    if (!openaiApiKey) {
+      res.status(400).json({ error: "OPENAI_API_KEY is not configured." });
+      return;
+    }
+
+    const aiConfig: OpenAIConfig = {
+      apiKey: openaiApiKey,
+      model: openaiModel,
+      baseUrl: env.openaiBaseUrl,
+    };
+
+    const iapRows = repo.listStoreIaps(appId, store);
+    const storeLocales = repo
+      .listStoreLocales(appId)
+      .filter((row) => row.store === store)
+      .map((row) => toCanonical(row.locale))
+      .filter((locale) => locale.length > 0 && locale !== sourceLocale);
+
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.flushHeaders();
+
+    const writeLine = (data: Record<string, unknown>) => {
+      res.write(JSON.stringify(data) + "\n");
+    };
+
+    writeLine({
+      type: "start",
+      store,
+      sourceLocale,
+      totalIaps: iapRows.length,
+      totalLocales: storeLocales.length,
+    });
+
+    if (iapRows.length === 0) {
+      writeLine({ type: "done", translatedLocales: 0, changedFields: 0 });
+      res.end();
+      return;
+    }
+
+    const DELAY_BETWEEN_CALLS_MS = 500;
+    const storeName = store === "app_store" ? "App Store IAP" : "Play Store IAP";
+    let translatedLocaleCount = 0;
+    let changedFieldCount = 0;
+
+    for (const row of iapRows) {
+      const detail = parseIapDetailJson(row.detailJson);
+      if (store === "app_store") {
+        const parsed = parseAppStoreIapDetail(detail);
+        if (!parsed) {
+          writeLine({
+            type: "iap_skip",
+            productId: row.productId,
+            reason: "IAP detayı parse edilemedi.",
+          });
+          continue;
+        }
+
+        const sourceEntry = findLocaleEntry(parsed.localizations, sourceLocale);
+        const sourceName = sourceEntry?.name?.trim() || "";
+        const sourceDescription = sourceEntry?.description?.trim() || "";
+
+        if (!sourceName && !sourceDescription) {
+          writeLine({
+            type: "iap_skip",
+            productId: parsed.productId,
+            iapType: parsed.inAppPurchaseType,
+            reason: `Source locale (${sourceLocale}) için name/description bulunamadı.`,
+          });
+          continue;
+        }
+
+        const targetLocaleSet = new Set<string>(storeLocales);
+        for (const localization of parsed.localizations) {
+          const locale = toCanonical(localization.locale);
+          if (locale && locale !== sourceLocale) targetLocaleSet.add(locale);
+        }
+        const targetLocales = Array.from(targetLocaleSet).sort((a, b) => a.localeCompare(b));
+
+        writeLine({
+          type: "iap_start",
+          productId: parsed.productId,
+          iapType: parsed.inAppPurchaseType,
+          localeCount: targetLocales.length,
+        });
+
+        for (const targetLocale of targetLocales) {
+          const targetEntry = findLocaleEntry(parsed.localizations, targetLocale);
+          const localeFields: Array<{ field: string; value: string; oldValue: string }> = [];
+
+          if (sourceName) {
+            try {
+              const translated = await translateWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale,
+                text: sourceName,
+                fieldName: "name",
+                storeName,
+              });
+              const oldValue = targetEntry?.name ?? "";
+              if (translated.trim() !== oldValue.trim()) {
+                localeFields.push({ field: "name", value: translated, oldValue });
+                changedFieldCount += 1;
+              }
+              writeLine({
+                type: "progress",
+                productId: parsed.productId,
+                iapType: parsed.inAppPurchaseType,
+                locale: targetLocale,
+                field: "name",
+                status: "translated",
+              });
+            } catch (error) {
+              writeLine({
+                type: "error",
+                productId: parsed.productId,
+                iapType: parsed.inAppPurchaseType,
+                locale: targetLocale,
+                field: "name",
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
+          }
+
+          if (sourceDescription) {
+            try {
+              const translated = await translateWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale,
+                text: sourceDescription,
+                fieldName: "description",
+                storeName,
+              });
+              const oldValue = targetEntry?.description ?? "";
+              if (translated.trim() !== oldValue.trim()) {
+                localeFields.push({ field: "description", value: translated, oldValue });
+                changedFieldCount += 1;
+              }
+              writeLine({
+                type: "progress",
+                productId: parsed.productId,
+                iapType: parsed.inAppPurchaseType,
+                locale: targetLocale,
+                field: "description",
+                status: "translated",
+              });
+            } catch (error) {
+              writeLine({
+                type: "error",
+                productId: parsed.productId,
+                iapType: parsed.inAppPurchaseType,
+                locale: targetLocale,
+                field: "description",
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
+          }
+
+          if (localeFields.length > 0) {
+            translatedLocaleCount += 1;
+            writeLine({
+              type: "locale_done",
+              productId: parsed.productId,
+              iapType: parsed.inAppPurchaseType,
+              locale: targetLocale,
+              fields: localeFields,
+            });
+          } else {
+            writeLine({
+              type: "locale_skip",
+              productId: parsed.productId,
+              iapType: parsed.inAppPurchaseType,
+              locale: targetLocale,
+              reason: "Fark yok",
+            });
+          }
+        }
+        continue;
+      }
+
+      const parsed = parsePlayStoreIapDetail(detail);
+      if (!parsed) {
+        writeLine({
+          type: "iap_skip",
+          productId: row.productId,
+          reason: "IAP detayı parse edilemedi.",
+        });
+        continue;
+      }
+
+      const sourceEntry = findLocaleEntry(parsed.listings, sourceLocale);
+      const sourceTitle = sourceEntry?.title?.trim() || "";
+      const sourceDescription = sourceEntry?.description?.trim() || "";
+      const sourceBenefits = (sourceEntry?.benefits ?? [])
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      if (!sourceTitle && !sourceDescription && sourceBenefits.length === 0) {
+        writeLine({
+          type: "iap_skip",
+          productId: parsed.productId,
+          iapType: parsed.purchaseType,
+          reason: `Source locale (${sourceLocale}) için title/description/benefits bulunamadı.`,
+        });
+        continue;
+      }
+
+      const targetLocaleSet = new Set<string>(storeLocales);
+      for (const listing of parsed.listings) {
+        const locale = toCanonical(listing.locale);
+        if (locale && locale !== sourceLocale) targetLocaleSet.add(locale);
+      }
+      const targetLocales = Array.from(targetLocaleSet).sort((a, b) => a.localeCompare(b));
+
+      writeLine({
+        type: "iap_start",
+        productId: parsed.productId,
+        iapType: parsed.purchaseType,
+        localeCount: targetLocales.length,
+      });
+
+      for (const targetLocale of targetLocales) {
+        const targetEntry = findLocaleEntry(parsed.listings, targetLocale);
+        const localeFields: Array<{ field: string; value: string; oldValue: string }> = [];
+
+        if (sourceTitle) {
+          try {
+            const translated = await translateWithRetry({
+              config: aiConfig,
+              sourceLocale,
+              targetLocale,
+              text: sourceTitle,
+              fieldName: "title",
+              storeName,
+            });
+            const oldValue = targetEntry?.title ?? "";
+            if (translated.trim() !== oldValue.trim()) {
+              localeFields.push({ field: "title", value: translated, oldValue });
+              changedFieldCount += 1;
+            }
+            writeLine({
+              type: "progress",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "title",
+              status: "translated",
+            });
+          } catch (error) {
+            writeLine({
+              type: "error",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "title",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
+        }
+
+        if (sourceDescription) {
+          try {
+            const translated = await translateWithRetry({
+              config: aiConfig,
+              sourceLocale,
+              targetLocale,
+              text: sourceDescription,
+              fieldName: "description",
+              storeName,
+            });
+            const oldValue = targetEntry?.description ?? "";
+            if (translated.trim() !== oldValue.trim()) {
+              localeFields.push({ field: "description", value: translated, oldValue });
+              changedFieldCount += 1;
+            }
+            writeLine({
+              type: "progress",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "description",
+              status: "translated",
+            });
+          } catch (error) {
+            writeLine({
+              type: "error",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "description",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
+        }
+
+        if (sourceBenefits.length > 0) {
+          try {
+            const translatedBenefits: string[] = [];
+            for (const benefit of sourceBenefits) {
+              const translated = await translateWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale,
+                text: benefit,
+                fieldName: "benefits",
+                storeName,
+              });
+              translatedBenefits.push(translated);
+              await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
+            }
+            const newValue = translatedBenefits.join("\n");
+            const oldValue = (targetEntry?.benefits ?? []).join("\n");
+            if (newValue.trim() !== oldValue.trim()) {
+              localeFields.push({ field: "benefits", value: newValue, oldValue });
+              changedFieldCount += 1;
+            }
+            writeLine({
+              type: "progress",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "benefits",
+              status: "translated",
+            });
+          } catch (error) {
+            writeLine({
+              type: "error",
+              productId: parsed.productId,
+              iapType: parsed.purchaseType,
+              locale: targetLocale,
+              field: "benefits",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        if (localeFields.length > 0) {
+          translatedLocaleCount += 1;
+          writeLine({
+            type: "locale_done",
+            productId: parsed.productId,
+            iapType: parsed.purchaseType,
+            locale: targetLocale,
+            fields: localeFields,
+          });
+        } else {
+          writeLine({
+            type: "locale_skip",
+            productId: parsed.productId,
+            iapType: parsed.purchaseType,
+            locale: targetLocale,
+            reason: "Fark yok",
+          });
+        }
+      }
+    }
+
+    writeLine({
+      type: "done",
+      translatedLocales: translatedLocaleCount,
+      changedFields: changedFieldCount,
+    });
+    res.end();
+  } catch (error) {
+    if (!res.headersSent) {
+      next(error);
+    } else {
+      try {
+        res.write(JSON.stringify({ type: "fatal", error: error instanceof Error ? error.message : String(error) }) + "\n");
+      } catch {
+        // Ignore write errors while shutting down stream
+      }
+      res.end();
+    }
+  }
+});
 
 app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
   try {

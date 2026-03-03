@@ -48,6 +48,14 @@ export type StoreLocaleDetailRecord = {
   syncedAt: string;
 };
 
+export type StoreIapRecord = {
+  appId: number;
+  store: StoreId;
+  productId: string;
+  detailJson: string;
+  syncedAt: string;
+};
+
 export type SyncJobRecord = {
   id: number;
   appId: number;
@@ -146,6 +154,16 @@ function parseStoreLocaleDetailRow(row: Record<string, unknown>): StoreLocaleDet
   };
 }
 
+function parseStoreIapRow(row: Record<string, unknown>): StoreIapRecord {
+  return {
+    appId: Number(row.app_id),
+    store: String(row.store) as StoreId,
+    productId: String(row.product_id),
+    detailJson: String(row.detail_json ?? "{}"),
+    syncedAt: String(row.synced_at),
+  };
+}
+
 export class MobileAutomatorRepository {
   private db: Database.Database;
 
@@ -228,8 +246,20 @@ export class MobileAutomatorRepository {
         FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS store_iaps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        store TEXT NOT NULL CHECK (store IN ('app_store', 'play_store')),
+        product_id TEXT NOT NULL,
+        detail_json TEXT NOT NULL,
+        synced_at TEXT NOT NULL,
+        UNIQUE(app_id, store, product_id),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_store_locales_app_store ON store_locales(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_locale_details_app_store ON store_locale_details(app_id, store);
+      CREATE INDEX IF NOT EXISTS idx_store_iaps_app_store ON store_iaps(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_naming_overrides_app ON naming_overrides(app_id);
       CREATE INDEX IF NOT EXISTS idx_sync_jobs_app ON sync_jobs(app_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sync_job_logs_job ON sync_job_logs(job_id, created_at ASC);
@@ -475,6 +505,77 @@ export class MobileAutomatorRepository {
 
     tx();
     return this.listStoreLocaleDetails(appId, store);
+  }
+
+  listStoreIaps(appId: number, store?: StoreId): StoreIapRecord[] {
+    const rows = store
+      ? (this.db
+          .prepare(
+            `SELECT app_id, store, product_id, detail_json, synced_at
+             FROM store_iaps
+             WHERE app_id = ? AND store = ?
+             ORDER BY store ASC, product_id ASC`
+          )
+          .all(appId, store) as Array<Record<string, unknown>>)
+      : (this.db
+          .prepare(
+            `SELECT app_id, store, product_id, detail_json, synced_at
+             FROM store_iaps
+             WHERE app_id = ?
+             ORDER BY store ASC, product_id ASC`
+          )
+          .all(appId) as Array<Record<string, unknown>>);
+
+    return rows.map(parseStoreIapRow);
+  }
+
+  replaceStoreIaps(
+    appId: number,
+    store: StoreId,
+    entries: Array<{
+      productId: string;
+      detail: unknown;
+      syncedAt?: string;
+    }>
+  ): StoreIapRecord[] {
+    const dedup = new Map<
+      string,
+      {
+        detailJson: string;
+        syncedAt: string;
+      }
+    >();
+
+    for (const entry of entries) {
+      const productId = entry.productId.trim();
+      if (!productId) continue;
+      dedup.set(productId, {
+        detailJson: JSON.stringify(entry.detail ?? {}),
+        syncedAt: entry.syncedAt ?? nowIso(),
+      });
+    }
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare("DELETE FROM store_iaps WHERE app_id = ? AND store = ?")
+        .run(appId, store);
+
+      const insertStmt = this.db.prepare(
+        `INSERT INTO store_iaps (app_id, store, product_id, detail_json, synced_at)
+         VALUES (?, ?, ?, ?, ?)`
+      );
+
+      for (const [productId, value] of dedup.entries()) {
+        insertStmt.run(appId, store, productId, value.detailJson, value.syncedAt);
+      }
+
+      this.db
+        .prepare("UPDATE apps SET updated_at = ? WHERE id = ?")
+        .run(nowIso(), appId);
+    });
+
+    tx();
+    return this.listStoreIaps(appId, store);
   }
 
   listNamingOverrides(appId: number): NamingRecord[] {

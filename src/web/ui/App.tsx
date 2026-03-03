@@ -7,6 +7,7 @@ import ChangeQueueDrawer from './components/organisms/ChangeQueueDrawer';
 import CreateAppDialog from './components/organisms/CreateAppDialog';
 import GenerateTranslationsDialog from './components/organisms/GenerateTranslationsDialog';
 import HeaderBar from './components/organisms/HeaderBar';
+import IapDialog from './components/organisms/IapDialog';
 import RnLocalesDialog from './components/organisms/RnLocalesDialog';
 import RulesDialog from './components/organisms/RulesDialog';
 import StoreLocalePanels from './components/organisms/StoreLocalePanels';
@@ -17,11 +18,13 @@ import type {
   AppListItem,
   AppRecord,
   AppStoreLocaleDetail,
+  IapListPayload,
   LocaleCatalogEntry,
   MetaPayload,
   PendingStoreChange,
   PendingStoreChangeMap,
   PendingStoreFieldChange,
+  PendingStoreIapFieldChange,
   PendingStoreLocaleChange,
   PendingValueMap,
   PlayStoreLocaleDetail,
@@ -29,6 +32,7 @@ import type {
   StoreLocaleDetailsListPayload,
   StoreLocaleDetailPayload,
   StoreLocalesPayload,
+  StoreIapEntry,
   StoreRuleSet,
   SyncResponse,
 } from './types';
@@ -151,6 +155,10 @@ function toStoreChangeKey(store: StoreId, locale: string, field: string): string
 
 function toStoreLocaleChangeKey(store: StoreId, locale: string): string {
   return `${store}::${locale}::__locale__`;
+}
+
+function toStoreIapChangeKey(store: StoreId, productId: string, locale: string, field: string): string {
+  return `${store}::iap::${productId}::${locale}::${field}`;
 }
 
 function applyPendingLocaleChanges(
@@ -458,6 +466,12 @@ function parseChangeQueuePayloadFromText(rawText: string): PendingStoreChangeMap
     const kind = typeof row.kind === 'string' ? row.kind.trim() : '';
     if (!store || !locale) continue;
 
+    const productId =
+      typeof row.productId === 'string' && row.productId.trim().length > 0
+        ? row.productId.trim()
+        : '';
+    const iapType = typeof row.iapType === 'string' ? row.iapType.trim() : '';
+
     if (kind === 'locale' || action === 'add' || action === 'remove') {
       if (action === 'add' || action === 'remove') {
         const key = toStoreLocaleChangeKey(store, locale);
@@ -475,6 +489,31 @@ function parseChangeQueuePayloadFromText(rawText: string): PendingStoreChangeMap
       typeof row.field === 'string' && row.field.trim().length > 0
         ? row.field.trim()
         : '';
+    if (kind === 'iap_field') {
+      if (!field || !productId) continue;
+      const oldValue = typeof row.oldValue === 'string' ? row.oldValue : '';
+      const nextValueRaw = row.newValue;
+      const newValue =
+        typeof nextValueRaw === 'string'
+          ? nextValueRaw
+          : nextValueRaw === undefined || nextValueRaw === null
+            ? ''
+            : String(nextValueRaw);
+      const key = toStoreIapChangeKey(store, productId, locale, field);
+      map[key] = {
+        kind: 'iap_field',
+        key,
+        store,
+        productId,
+        iapType: iapType || undefined,
+        locale,
+        field,
+        oldValue,
+        newValue,
+      };
+      continue;
+    }
+
     if (kind === 'field' || field) {
       if (!field) continue;
       const oldValue = typeof row.oldValue === 'string' ? row.oldValue : '';
@@ -561,6 +600,14 @@ type RawPlayToIosResponse = {
   skipped: Array<{ playLocale: string; reason: string }>;
 };
 
+type IapGenerateLocaleDoneEvent = {
+  type: 'locale_done';
+  productId: string;
+  iapType?: string;
+  locale: string;
+  fields: Array<{ field: string; value: string; oldValue: string }>;
+};
+
 function normalizeIosToPlayDiff(raw: RawIosToPlayResponse): StoreDiffResponse {
   return {
     entries: raw.entries.map((e) => ({
@@ -593,12 +640,13 @@ export default function App() {
   const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
   const [selectedApp, setSelectedApp] = useState<AppRecord | null>(null);
   const selectedAppIdRef = useRef<number | null>(null);
-  const populateQueueFromDiffRef = useRef<(result: StoreDiffResponse, options?: { silent?: boolean }) => void>(() => {});
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [generateModalStore, setGenerateModalStore] = useState<StoreId>('app_store');
+  const [isIapOpen, setIsIapOpen] = useState(false);
+  const [iapModalStore, setIapModalStore] = useState<StoreId>('app_store');
   const [isRnLocalesOpen, setIsRnLocalesOpen] = useState(false);
   const [rnLocalesStore, setRnLocalesStore] = useState<StoreId>('app_store');
 
@@ -617,6 +665,10 @@ export default function App() {
   const [playDetail, setPlayDetail] = useState<PlayStoreLocaleDetail | null>(null);
   const [isIosLoading, setIsIosLoading] = useState(false);
   const [isPlayLoading, setIsPlayLoading] = useState(false);
+  const [isIapLoading, setIsIapLoading] = useState(false);
+  const [isGeneratingIap, setIsGeneratingIap] = useState(false);
+  const [appStoreIaps, setAppStoreIaps] = useState<StoreIapEntry[]>([]);
+  const [playStoreIaps, setPlayStoreIaps] = useState<StoreIapEntry[]>([]);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [isConsoleFollowEnabled, setIsConsoleFollowEnabled] = useState(true);
   const [isChangeDrawerOpen, setIsChangeDrawerOpen] = useState(false);
@@ -644,6 +696,8 @@ export default function App() {
     setPlaySelectedLocale('');
     setIosDetail(null);
     setPlayDetail(null);
+    setAppStoreIaps([]);
+    setPlayStoreIaps([]);
     setPendingStoreChanges({});
   }, []);
 
@@ -668,6 +722,24 @@ export default function App() {
     );
     return asPlayStoreDetail(payload?.detail);
   }, []);
+
+  const loadIaps = useCallback(
+    async (appId: number) => {
+      setIsIapLoading(true);
+      try {
+        const payload = await api<IapListPayload>(`/api/apps/${appId}/iaps`);
+        setAppStoreIaps(Array.isArray(payload?.appStoreIaps) ? payload.appStoreIaps : []);
+        setPlayStoreIaps(Array.isArray(payload?.playStoreIaps) ? payload.playStoreIaps : []);
+      } catch (error) {
+        setAppStoreIaps([]);
+        setPlayStoreIaps([]);
+        pushStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        setIsIapLoading(false);
+      }
+    },
+    [pushStatus]
+  );
 
   const loadStorePanels = useCallback(
     async (appId: number, sourceLocale: string) => {
@@ -732,9 +804,12 @@ export default function App() {
         setPendingStoreChanges({});
       }
 
-      await loadStorePanels(app.id, app.sourceLocale || 'en-US');
+      await Promise.all([
+        loadStorePanels(app.id, app.sourceLocale || 'en-US'),
+        loadIaps(app.id),
+      ]);
     },
-    [loadStorePanels]
+    [loadIaps, loadStorePanels]
   );
 
   const loadApps = useCallback(
@@ -777,6 +852,13 @@ export default function App() {
     () =>
       Object.values(pendingStoreChanges).sort((a, b) => {
         if (a.store !== b.store) return a.store.localeCompare(b.store);
+        if (a.kind === 'iap_field' && b.kind !== 'iap_field') return 1;
+        if (a.kind !== 'iap_field' && b.kind === 'iap_field') return -1;
+        if (a.kind === 'iap_field' && b.kind === 'iap_field') {
+          if (a.productId !== b.productId) return a.productId.localeCompare(b.productId);
+          if (a.locale !== b.locale) return a.locale.localeCompare(b.locale);
+          return a.field.localeCompare(b.field);
+        }
         if (a.locale !== b.locale) return a.locale.localeCompare(b.locale);
         const aField = a.kind === 'field' ? a.field : '__locale__';
         const bField = b.kind === 'field' ? b.field : '__locale__';
@@ -873,6 +955,16 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!showIosPanel && iapModalStore === 'app_store' && showPlayPanel) {
+      setIapModalStore('play_store');
+      return;
+    }
+    if (!showPlayPanel && iapModalStore === 'play_store' && showIosPanel) {
+      setIapModalStore('app_store');
+    }
+  }, [iapModalStore, showIosPanel, showPlayPanel]);
+
+  useEffect(() => {
     if (!showIosPanel && generateModalStore === 'app_store' && showPlayPanel) {
       setGenerateModalStore('play_store');
       return;
@@ -914,7 +1006,6 @@ export default function App() {
     async (
       appId: number,
       storeScope: 'both' | 'app_store' | 'play_store',
-      options?: { skipDiff?: boolean }
     ): Promise<string[]> => {
       const scopeLabel =
         storeScope === 'both'
@@ -934,6 +1025,15 @@ export default function App() {
           (e: { store?: string; message?: string }) =>
             `[${e.store ?? '?'}] ${e.message ?? 'Bilinmeyen hata'}`
         );
+
+        const appStoreIapError = syncResult?.appStore?.iapError?.trim();
+        if (appStoreIapError) {
+          pushStatus(`App Store IAP uyarısı: ${appStoreIapError}`);
+        }
+        const playStoreIapError = syncResult?.playStore?.iapError?.trim();
+        if (playStoreIapError) {
+          pushStatus(`Play Store IAP uyarısı: ${playStoreIapError}`);
+        }
       } catch (syncError) {
         syncErrors = [syncError instanceof Error ? syncError.message : String(syncError)];
       }
@@ -947,30 +1047,6 @@ export default function App() {
         }
       } else {
         pushStatus('Eşzamanlama tamamlandı.');
-      }
-
-      // Auto-diff iOS ↔ Play Store after sync and populate queue (both directions)
-      if (!options?.skipDiff) {
-        let totalDiffs = 0;
-        try {
-          const raw = await api<RawIosToPlayResponse>(`/api/apps/${appId}/prepare-ios-to-play`);
-          const diff = normalizeIosToPlayDiff(raw);
-          if (diff.entries.length > 0) {
-            populateQueueFromDiffRef.current(diff, { silent: true });
-            totalDiffs += diff.entries.length;
-          }
-        } catch { /* best-effort */ }
-        try {
-          const raw = await api<RawPlayToIosResponse>(`/api/apps/${appId}/prepare-play-to-ios`);
-          const diff = normalizePlayToIosDiff(raw);
-          if (diff.entries.length > 0) {
-            populateQueueFromDiffRef.current(diff, { silent: true });
-            totalDiffs += diff.entries.length;
-          }
-        } catch { /* best-effort */ }
-        if (totalDiffs > 0) {
-          pushStatus(`iOS ↔ Play Store: ${totalDiffs} locale farkı kuyruğa eklendi.`);
-        }
       }
 
       return syncErrors;
@@ -1102,7 +1178,7 @@ export default function App() {
     },
     [pushStatus]
   );
-  populateQueueFromDiffRef.current = populateQueueFromDiff;
+
 
   const handleCopyIosToPlay = useCallback(async () => {
     if (!selectedAppId) return;
@@ -1372,6 +1448,219 @@ export default function App() {
     }
     setIsGenerateModalOpen(true);
   }, [showIosPanel, showPlayPanel]);
+
+  const handleOpenIapModal = useCallback(() => {
+    if (showIosPanel) {
+      setIapModalStore('app_store');
+    } else if (showPlayPanel) {
+      setIapModalStore('play_store');
+    }
+    setIsIapOpen(true);
+    if (selectedAppId) {
+      void loadIaps(selectedAppId);
+    }
+  }, [loadIaps, selectedAppId, showIosPanel, showPlayPanel]);
+
+  const handleGenerateIapTranslations = useCallback(
+    async (store: StoreId) => {
+      if (!selectedAppId) return;
+
+      const storeName = store === 'app_store' ? 'App Store' : 'Play Store';
+      const sourceLocale = selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US';
+      setIsGeneratingIap(true);
+      pushStatus(`✨ ${storeName} IAP çevirileri oluşturuluyor (source: ${sourceLocale})...`);
+
+      try {
+        const response = await fetch(
+          `/api/apps/${selectedAppId}/generate-iap-translations?store=${encodeURIComponent(store)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ store }),
+          }
+        );
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          let message = `HTTP ${response.status}`;
+          try {
+            const parsed = JSON.parse(errBody);
+            if (parsed.error) message = parsed.error;
+          } catch {
+            // no-op
+          }
+          pushStatus(`IAP generate hatası: ${message}`);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          pushStatus('IAP generate stream okunamadı.');
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const collectedChanges = new Map<string, PendingStoreIapFieldChange>();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(line);
+            } catch {
+              continue;
+            }
+
+            const type = event.type;
+            if (type === 'start') {
+              const totalIaps =
+                typeof event.totalIaps === 'number' ? event.totalIaps : 0;
+              const totalLocales =
+                typeof event.totalLocales === 'number' ? event.totalLocales : 0;
+              pushStatus(
+                `IAP generate başladı (${totalIaps} ürün / ${totalLocales} locale).`
+              );
+              continue;
+            }
+
+            if (type === 'iap_start') {
+              const productId =
+                typeof event.productId === 'string' ? event.productId.trim() : '';
+              const iapType =
+                typeof event.iapType === 'string' ? event.iapType.trim() : '';
+              if (productId) {
+                pushStatus(
+                  `→ ${productId}${iapType ? ` (${iapType})` : ''} çevriliyor...`
+                );
+              }
+              continue;
+            }
+
+            if (type === 'progress') {
+              const productId =
+                typeof event.productId === 'string' ? event.productId.trim() : '';
+              const locale =
+                typeof event.locale === 'string' ? event.locale.trim() : '';
+              const field =
+                typeof event.field === 'string' ? event.field.trim() : '';
+              if (productId && locale && field) {
+                pushStatus(`  ${productId} ${locale}/${field}: çevrildi`);
+              }
+              continue;
+            }
+
+            if (type === 'locale_done') {
+              const doneEvent = event as unknown as IapGenerateLocaleDoneEvent;
+              const productId = doneEvent.productId?.trim() || '';
+              const locale = doneEvent.locale?.trim() || '';
+              const iapType = doneEvent.iapType?.trim() || undefined;
+              const fields = Array.isArray(doneEvent.fields) ? doneEvent.fields : [];
+              if (!productId || !locale || fields.length === 0) continue;
+
+              for (const field of fields) {
+                const fieldId = typeof field.field === 'string' ? field.field.trim() : '';
+                if (!fieldId) continue;
+                const key = toStoreIapChangeKey(store, productId, locale, fieldId);
+                collectedChanges.set(key, {
+                  kind: 'iap_field',
+                  key,
+                  store,
+                  productId,
+                  iapType,
+                  locale,
+                  field: fieldId,
+                  oldValue: typeof field.oldValue === 'string' ? field.oldValue : '',
+                  newValue: typeof field.value === 'string' ? field.value : '',
+                });
+              }
+
+              pushStatus(`✓ ${productId} ${locale}: ${fields.length} alan`);
+              continue;
+            }
+
+            if (type === 'iap_skip') {
+              const productId =
+                typeof event.productId === 'string' ? event.productId.trim() : '';
+              const reason =
+                typeof event.reason === 'string' ? event.reason.trim() : 'Atlandı';
+              pushStatus(`⚠ ${productId || 'IAP'}: ${reason}`);
+              continue;
+            }
+
+            if (type === 'locale_skip') {
+              const productId =
+                typeof event.productId === 'string' ? event.productId.trim() : '';
+              const locale =
+                typeof event.locale === 'string' ? event.locale.trim() : '';
+              const reason =
+                typeof event.reason === 'string' ? event.reason.trim() : 'Atlandı';
+              pushStatus(`⚠ ${productId} ${locale}: ${reason}`);
+              continue;
+            }
+
+            if (type === 'error') {
+              const productId =
+                typeof event.productId === 'string' ? event.productId.trim() : '';
+              const locale =
+                typeof event.locale === 'string' ? event.locale.trim() : '';
+              const field =
+                typeof event.field === 'string' ? event.field.trim() : '';
+              const reason =
+                typeof event.error === 'string' ? event.error.trim() : 'Bilinmeyen hata';
+              pushStatus(`✗ ${productId} ${locale}/${field}: ${reason}`);
+              continue;
+            }
+
+            if (type === 'done') {
+              const translatedLocales =
+                typeof event.translatedLocales === 'number' ? event.translatedLocales : 0;
+              const changedFields =
+                typeof event.changedFields === 'number' ? event.changedFields : 0;
+              pushStatus(
+                `IAP generate tamamlandı (${translatedLocales} locale, ${changedFields} alan).`
+              );
+              continue;
+            }
+
+            if (type === 'fatal') {
+              const reason =
+                typeof event.error === 'string' ? event.error.trim() : 'Bilinmeyen hata';
+              pushStatus(`IAP generate kritik hata: ${reason}`);
+            }
+          }
+        }
+
+        if (collectedChanges.size > 0) {
+          setPendingStoreChanges((prev) => {
+            const next: PendingStoreChangeMap = { ...prev };
+            for (const [key, change] of collectedChanges.entries()) {
+              next[key] = change;
+            }
+            return next;
+          });
+          setIsChangeDrawerOpen(true);
+          pushStatus(`IAP generate: ${collectedChanges.size} alan değişiklik listesine eklendi.`);
+        } else {
+          pushStatus('IAP generate: değişiklik oluşmadı.');
+        }
+      } catch (error) {
+        pushStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        setIsGeneratingIap(false);
+      }
+    },
+    [appConfig.sourceLocale, pushStatus, selectedApp?.sourceLocale, selectedAppId]
+  );
 
   const handleExportRnLocales = useCallback(async () => {
     if (!selectedAppId) return;
@@ -1813,14 +2102,25 @@ export default function App() {
                 locale: change.locale,
                 action: change.action,
               }
-            : {
+            : change.kind === 'iap_field'
+              ? {
+                  kind: 'iap_field',
+                  store: change.store,
+                  productId: change.productId,
+                  iapType: change.iapType,
+                  locale: change.locale,
+                  field: change.field,
+                  oldValue: change.oldValue,
+                  newValue: change.newValue,
+                }
+              : {
                 kind: 'field',
                 store: change.store,
                 locale: change.locale,
                 field: change.field,
                 oldValue: change.oldValue,
                 newValue: change.newValue,
-              }
+                }
         ),
       };
 
@@ -1902,6 +2202,9 @@ export default function App() {
       const fieldEntries = allEntries.filter(
         (entry): entry is PendingStoreFieldChange => entry.kind === 'field'
       );
+      const iapEntries = allEntries.filter(
+        (entry): entry is PendingStoreIapFieldChange => entry.kind === 'iap_field'
+      );
 
       // Find field-only updates: fields for locales that have no locale add/remove entry
       const localeActionKeys = new Set(localeEntries.map((e) => `${e.store}::${e.locale}`));
@@ -1914,9 +2217,15 @@ export default function App() {
       }
 
       if (localeEntries.length === 0 && fieldOnlyByLocale.size === 0) {
-        pushStatus(
-          storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
-        );
+        if (iapEntries.length > 0) {
+          pushStatus(
+            `IAP değişiklikleri henüz güncelleme akışına bağlı değil (${iapEntries.length} kayıt beklemede).`
+          );
+        } else {
+          pushStatus(
+            storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
+          );
+        }
         return;
       }
 
@@ -2032,6 +2341,12 @@ export default function App() {
           pushStatus(`${result.succeeded.length} değişiklik uygulandı.`);
         }
 
+        if (iapEntries.length > 0) {
+          pushStatus(
+            `Not: ${iapEntries.length} IAP değişikliği kuyrukta bekliyor (henüz apply edilmedi).`
+          );
+        }
+
         // Auto-sync affected stores via shared routine
         const succeededStores = new Set(result.succeeded.map((s) => s.store));
         if (succeededStores.size > 0) {
@@ -2041,7 +2356,7 @@ export default function App() {
               : succeededStores.has('app_store')
                 ? 'app_store'
                 : 'play_store';
-          await syncAndRefresh(selectedAppId, storeScope, { skipDiff: true });
+          await syncAndRefresh(selectedAppId, storeScope);
         }
       } catch (error) {
         pushStatus(
@@ -2093,6 +2408,7 @@ export default function App() {
               void handleUpdateConfigSubmit(event);
             }}
             onOpenGenerateModal={handleOpenGenerateModal}
+            onOpenIapModal={handleOpenIapModal}
             onCopyIosToPlay={() => {
               void handleCopyIosToPlay();
             }}
@@ -2233,6 +2549,23 @@ export default function App() {
         onClose={() => setIsGenerateModalOpen(false)}
         onStart={handleStartGenerate}
         isRunning={isApplyingConfig}
+      />
+
+      <IapDialog
+        isOpen={isIapOpen}
+        selectedStore={iapModalStore}
+        isLoading={isIapLoading}
+        isGenerating={isGeneratingIap}
+        sourceLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}
+        canShowIos={showIosPanel}
+        canShowPlay={showPlayPanel}
+        appStoreIaps={appStoreIaps}
+        playStoreIaps={playStoreIaps}
+        onSelectStore={setIapModalStore}
+        onGenerate={(store) => {
+          void handleGenerateIapTranslations(store);
+        }}
+        onClose={() => setIsIapOpen(false)}
       />
 
       <RnLocalesDialog

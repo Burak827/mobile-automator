@@ -16,6 +16,9 @@ function formatChangeTitle(change: PendingStoreChange): string {
   if (change.kind === 'locale') {
     return change.action === 'add' ? 'Locale Ekle' : 'Locale Sil';
   }
+  if (change.kind === 'iap_field') {
+    return change.field;
+  }
   return change.field;
 }
 
@@ -103,6 +106,12 @@ export default function ChangeQueueDrawer({
                     {entry.locale}
                   </button>
                   <div className="change-field">{formatChangeTitle(entry)}</div>
+                  {entry.kind === 'iap_field' ? (
+                    <div className="change-field">
+                      {entry.productId}
+                      {entry.iapType ? ` · ${entry.iapType}` : ''}
+                    </div>
+                  ) : null}
                   {entry.kind === 'locale' ? (
                     <div className="change-values">
                       <code>{entry.action === 'add' ? 'eklensin' : 'silinsin'}</code>
