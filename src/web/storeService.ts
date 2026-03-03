@@ -363,7 +363,71 @@ type AscIapLocalizationListResponse = {
   };
 };
 
+type AscIapLocalizationResource = {
+  id: string;
+  attributes?: {
+    locale?: string;
+    name?: string;
+    description?: string;
+    state?: string;
+  };
+};
+
+type AscIapLookupEntry = {
+  iapId: string;
+  localizationsByLocale: Map<string, AscIapLocalizationResource>;
+};
+
+type AscIapLookupCacheEntry = {
+  expiresAt: number;
+  byProductId: Map<string, AscIapLookupEntry>;
+};
+
+type AscIapLookupResponse = {
+  data?: Array<{
+    id: string;
+    attributes?: {
+      productId?: string;
+    };
+  }>;
+  included?: Array<{
+    id: string;
+    type?: string;
+    attributes?: {
+      locale?: string;
+      name?: string;
+      description?: string;
+      state?: string;
+    };
+    relationships?: {
+      inAppPurchaseV2?: {
+        data?: { id?: string };
+      };
+      inAppPurchase?: {
+        data?: { id?: string };
+      };
+    };
+  }>;
+};
+
+type PlayIapLocalizationUpdateInput = {
+  productId: string;
+  iapType?: string;
+  locale: string;
+  title?: string;
+  description?: string;
+  benefits?: string[];
+};
+
+type GpcRegionsVersion = {
+  version?: string;
+};
+
+const GPC_DEFAULT_REGIONS_VERSION = "2022/02";
+
 export class StoreApiService {
+  private ascIapLookupCache = new Map<string, AscIapLookupCacheEntry>();
+
   private resolveAscClient(): AscClient {
     const env = loadEnvConfig();
     const issuerId = requireValue(env.ascIssuerId, "ASC_ISSUER_ID");
@@ -517,6 +581,416 @@ export class StoreApiService {
     }
 
     return this.mergeAppStoreIapLocalizations(rows);
+  }
+
+  private async buildAscIapLookup(
+    client: AscClient,
+    ascAppId: string
+  ): Promise<Map<string, AscIapLookupEntry>> {
+    const payload = await this.fetchAscPaginated<
+      NonNullable<AscIapLookupResponse["data"]>[number],
+      NonNullable<AscIapLookupResponse["included"]>[number]
+    >({
+      client,
+      path: `/v1/apps/${ascAppId}/inAppPurchasesV2`,
+      query: {
+        "fields[inAppPurchasesV2]": ["productId"],
+        "fields[inAppPurchaseLocalizations]": ["locale", "name", "description", "state"],
+        include: ["inAppPurchaseLocalizations"],
+        limit: 200,
+      },
+    });
+
+    const byPurchaseId = new Map<string, AscIapLookupEntry>();
+    const byProductId = new Map<string, AscIapLookupEntry>();
+
+    for (const row of payload.data) {
+      const iapId = row.id?.trim();
+      const productId = row.attributes?.productId?.trim();
+      if (!iapId || !productId) continue;
+      const entry: AscIapLookupEntry = {
+        iapId,
+        localizationsByLocale: new Map<string, AscIapLocalizationResource>(),
+      };
+      byPurchaseId.set(iapId, entry);
+      byProductId.set(productId, entry);
+    }
+
+    for (const inc of payload.included) {
+      const locale = toCanonical(inc.attributes?.locale ?? "");
+      if (!locale) continue;
+      const parentId =
+        inc.relationships?.inAppPurchaseV2?.data?.id ??
+        inc.relationships?.inAppPurchase?.data?.id;
+      if (!parentId) continue;
+      const parent = byPurchaseId.get(parentId);
+      if (!parent) continue;
+
+      parent.localizationsByLocale.set(locale, {
+        id: inc.id,
+        attributes: {
+          locale,
+          name: inc.attributes?.name,
+          description: inc.attributes?.description,
+          state: inc.attributes?.state,
+        },
+      });
+    }
+
+    const missingLocalizationFetches: Promise<void>[] = [];
+    for (const entry of byProductId.values()) {
+      if (entry.localizationsByLocale.size > 0) continue;
+      missingLocalizationFetches.push(
+        (async () => {
+          try {
+            const iapPayload = await this.fetchAscPaginated<
+              NonNullable<AscIapLocalizationListResponse["data"]>[number]
+            >({
+              client,
+              path: `/v1/inAppPurchasesV2/${entry.iapId}/inAppPurchaseLocalizations`,
+              query: {
+                "fields[inAppPurchaseLocalizations]": ["locale", "name", "description", "state"],
+                limit: 200,
+              },
+            });
+
+            for (const item of iapPayload.data) {
+              const locale = toCanonical(item.attributes?.locale ?? "");
+              if (!locale || !item.id) continue;
+              entry.localizationsByLocale.set(locale, {
+                id: item.id,
+                attributes: {
+                  locale,
+                  name: item.attributes?.name,
+                  description: item.attributes?.description,
+                  state: item.attributes?.state,
+                },
+              });
+            }
+          } catch {
+            // Keep partial lookup; create flow can still proceed for missing locales.
+          }
+        })()
+      );
+    }
+    if (missingLocalizationFetches.length > 0) {
+      await Promise.all(missingLocalizationFetches);
+    }
+
+    return byProductId;
+  }
+
+  private async getAscIapLookup(
+    client: AscClient,
+    ascAppId: string,
+    options?: { forceRefresh?: boolean }
+  ): Promise<Map<string, AscIapLookupEntry>> {
+    const forceRefresh = options?.forceRefresh ?? false;
+    const now = Date.now();
+    const cacheEntry = this.ascIapLookupCache.get(ascAppId);
+    if (!forceRefresh && cacheEntry && cacheEntry.expiresAt > now) {
+      return cacheEntry.byProductId;
+    }
+
+    const byProductId = await this.buildAscIapLookup(client, ascAppId);
+    this.ascIapLookupCache.set(ascAppId, {
+      byProductId,
+      expiresAt: now + 60_000,
+    });
+    return byProductId;
+  }
+
+  private clearAscIapLookup(ascAppId: string): void {
+    this.ascIapLookupCache.delete(ascAppId);
+  }
+
+  private normalizePlayIapType(iapType?: string): "one_time" | "subscription" | undefined {
+    const normalized = (iapType ?? "").trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (normalized.includes("sub")) return "subscription";
+    if (
+      normalized === "one_time" ||
+      normalized === "one-time" ||
+      normalized === "onetime" ||
+      normalized === "managed_product" ||
+      normalized === "managedproduct" ||
+      normalized === "inapp" ||
+      normalized === "one_time_product"
+    ) {
+      return "one_time";
+    }
+    return undefined;
+  }
+
+  private listPlayIapListingTitles(
+    rawListings:
+      | Array<GpcOneTimeProductListing | GpcSubscriptionListing>
+      | Record<string, GpcMapBasedIapListing>
+      | undefined
+  ): Array<{ locale: string; title: string }> {
+    const rows: Array<{ locale: string; title: string }> = [];
+
+    const pushRow = (localeRaw: string, titleRaw: unknown): void => {
+      const locale = toCanonical(localeRaw ?? "");
+      if (!locale) return;
+      if (typeof titleRaw !== "string") return;
+      const title = titleRaw.trim();
+      if (!title) return;
+      rows.push({ locale, title });
+    };
+
+    if (Array.isArray(rawListings)) {
+      for (const listing of rawListings) {
+        pushRow(listing.languageCode ?? "", listing.title);
+      }
+      return rows;
+    }
+
+    if (!rawListings || typeof rawListings !== "object") return rows;
+    for (const [locale, listing] of Object.entries(rawListings)) {
+      pushRow(locale, listing?.title);
+    }
+    return rows;
+  }
+
+  private getPlayIapTitleForLocale(
+    rawListings:
+      | Array<GpcOneTimeProductListing | GpcSubscriptionListing>
+      | Record<string, GpcMapBasedIapListing>
+      | undefined,
+    canonicalLocale: string
+  ): string | undefined {
+    const normalizedTarget = toCanonical(canonicalLocale);
+    if (!normalizedTarget) return undefined;
+    return this.listPlayIapListingTitles(rawListings).find(
+      (row) => row.locale === normalizedTarget
+    )?.title;
+  }
+
+  private resolvePlayIapTitleFallback(
+    rawListings:
+      | Array<GpcOneTimeProductListing | GpcSubscriptionListing>
+      | Record<string, GpcMapBasedIapListing>
+      | undefined,
+    canonicalLocale: string
+  ): string | undefined {
+    const normalizedTarget = toCanonical(canonicalLocale);
+    if (!normalizedTarget) return undefined;
+
+    const exact = this.getPlayIapTitleForLocale(rawListings, normalizedTarget);
+    if (exact) return exact;
+
+    const targetLanguage = normalizedTarget.split("-")[0] ?? "";
+    const rows = this.listPlayIapListingTitles(rawListings);
+    let sameLanguage: string | undefined;
+    let english: string | undefined;
+    let any: string | undefined;
+
+    for (const row of rows) {
+      if (!any) any = row.title;
+      const rowLanguage = row.locale.split("-")[0] ?? "";
+      if (!sameLanguage && rowLanguage === targetLanguage) {
+        sameLanguage = row.title;
+      }
+      if (!english && (row.locale === "en-US" || row.locale === "en")) {
+        english = row.title;
+      }
+    }
+
+    return sameLanguage ?? english ?? any;
+  }
+
+  private mergePlayIapListings(
+    rawListings:
+      | Array<GpcOneTimeProductListing | GpcSubscriptionListing>
+      | Record<string, GpcMapBasedIapListing>
+      | undefined,
+    canonicalLocale: string,
+    nextFields: {
+      title?: string;
+      description?: string;
+      benefits?: string[];
+    }
+  ): Array<GpcOneTimeProductListing | GpcSubscriptionListing> | Record<string, GpcMapBasedIapListing> {
+    const playLocale = toStoreLocale(canonicalLocale, "play_store");
+    const titleFallback = this.resolvePlayIapTitleFallback(rawListings, canonicalLocale);
+    const merged: GpcMapBasedIapListing = {};
+    if (nextFields.title !== undefined) merged.title = nextFields.title;
+    if (nextFields.description !== undefined) merged.description = nextFields.description;
+    if (nextFields.benefits !== undefined) merged.benefits = nextFields.benefits;
+
+    if (Array.isArray(rawListings)) {
+      const nextListings = rawListings.map((entry) => ({ ...entry }));
+      const index = nextListings.findIndex((entry) => {
+        const candidate = toCanonical(entry.languageCode ?? "");
+        return candidate === canonicalLocale;
+      });
+      if (index >= 0) {
+        nextListings[index] = {
+          ...nextListings[index],
+          ...merged,
+          languageCode: nextListings[index].languageCode ?? playLocale,
+        };
+        const title = nextListings[index].title?.trim();
+        if (!title && titleFallback) {
+          nextListings[index].title = titleFallback;
+        }
+      } else {
+        const newEntry: GpcOneTimeProductListing | GpcSubscriptionListing = {
+          languageCode: playLocale,
+          ...merged,
+        };
+        if (!newEntry.title?.trim() && titleFallback) {
+          newEntry.title = titleFallback;
+        }
+        nextListings.push(newEntry);
+      }
+      return nextListings;
+    }
+
+    const listingMap: Record<string, GpcMapBasedIapListing> =
+      rawListings && typeof rawListings === "object" ? { ...rawListings } : {};
+
+    let key = playLocale;
+    for (const existingKey of Object.keys(listingMap)) {
+      if (toCanonical(existingKey) === canonicalLocale) {
+        key = existingKey;
+        break;
+      }
+    }
+
+    listingMap[key] = {
+      ...(listingMap[key] ?? {}),
+      ...merged,
+    };
+    if (!listingMap[key].title?.trim() && titleFallback) {
+      listingMap[key].title = titleFallback;
+    }
+    return listingMap;
+  }
+
+  private resolvePlayRegionsVersion(product: unknown): string {
+    if (!product || typeof product !== "object") return GPC_DEFAULT_REGIONS_VERSION;
+    const row = product as { regionsVersion?: GpcRegionsVersion };
+    const version = row.regionsVersion?.version?.trim();
+    return version || GPC_DEFAULT_REGIONS_VERSION;
+  }
+
+  private async getPlayOneTimeProduct(
+    client: GpcClient,
+    packageName: string,
+    productId: string
+  ): Promise<GpcOneTimeProduct> {
+    const encodedProductId = encodeURIComponent(productId);
+    try {
+      return await client.get<GpcOneTimeProduct>(
+        `/androidpublisher/v3/applications/${packageName}/onetimeproducts/${encodedProductId}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/404|Not Found|not found/i.test(message)) throw error;
+      return client.get<GpcOneTimeProduct>(
+        `/androidpublisher/v3/applications/${packageName}/oneTimeProducts/${encodedProductId}`
+      );
+    }
+  }
+
+  private async patchPlayOneTimeProduct(
+    client: GpcClient,
+    packageName: string,
+    productId: string,
+    body: Record<string, unknown>,
+    regionsVersion: string
+  ): Promise<void> {
+    const encodedProductId = encodeURIComponent(productId);
+    const query = new URLSearchParams();
+    query.set("updateMask", "listings");
+    query.set("regionsVersion.version", regionsVersion);
+
+    const withRegionsQuery = query.toString();
+    const withoutRegions = new URLSearchParams();
+    withoutRegions.set("updateMask", "listings");
+    const withoutRegionsQuery = withoutRegions.toString();
+
+    const attemptPatch = async (basePath: string, queryString: string): Promise<void> => {
+      await client.patch(`${basePath}?${queryString}`, body);
+    };
+
+    const lowerBase = `/androidpublisher/v3/applications/${packageName}/onetimeproducts/${encodedProductId}`;
+    const camelBase = `/androidpublisher/v3/applications/${packageName}/oneTimeProducts/${encodedProductId}`;
+
+    try {
+      await attemptPatch(lowerBase, withRegionsQuery);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const shouldRetryWithoutRegions =
+        /regionsversion|unknown.*regions|invalid.*regions/i.test(message);
+
+      if (shouldRetryWithoutRegions) {
+        try {
+          await attemptPatch(lowerBase, withoutRegionsQuery);
+          return;
+        } catch {
+          // Fall through to alternative path below.
+        }
+      }
+
+      if (!/404|Not Found|not found/i.test(message)) throw error;
+    }
+
+    try {
+      await attemptPatch(camelBase, withRegionsQuery);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const shouldRetryWithoutRegions =
+        /regionsversion|unknown.*regions|invalid.*regions/i.test(message);
+      if (shouldRetryWithoutRegions) {
+        await attemptPatch(camelBase, withoutRegionsQuery);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async getPlaySubscription(
+    client: GpcClient,
+    packageName: string,
+    productId: string
+  ): Promise<GpcSubscription> {
+    const encodedProductId = encodeURIComponent(productId);
+    return client.get<GpcSubscription>(
+      `/androidpublisher/v3/applications/${packageName}/subscriptions/${encodedProductId}`
+    );
+  }
+
+  private async patchPlaySubscription(
+    client: GpcClient,
+    packageName: string,
+    productId: string,
+    body: Record<string, unknown>,
+    regionsVersion: string
+  ): Promise<void> {
+    const encodedProductId = encodeURIComponent(productId);
+    const query = new URLSearchParams();
+    query.set("updateMask", "listings");
+    query.set("regionsVersion.version", regionsVersion);
+    const withRegionsQuery = query.toString();
+    const withoutRegions = new URLSearchParams();
+    withoutRegions.set("updateMask", "listings");
+    const withoutRegionsQuery = withoutRegions.toString();
+
+    const pathBase = `/androidpublisher/v3/applications/${packageName}/subscriptions/${encodedProductId}`;
+    try {
+      await client.patch(`${pathBase}?${withRegionsQuery}`, body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/regionsversion|unknown.*regions|invalid.*regions/i.test(message)) {
+        throw error;
+      }
+      await client.patch(`${pathBase}?${withoutRegionsQuery}`, body);
+    }
   }
 
   private async resolveLatestAscVersion(
@@ -1480,6 +1954,236 @@ export class StoreApiService {
     } catch (error) {
       await client.deleteEdit(packageName, editId).catch(() => {});
       throw error;
+    }
+  }
+
+  async updateAscIapLocalizationFields(
+    app: AppRecord,
+    input: {
+      productId: string;
+      locale: string;
+      name?: string;
+      description?: string;
+    }
+  ): Promise<void> {
+    const ascAppId = app.ascAppId;
+    if (!ascAppId) throw new Error("ascAppId missing");
+
+    const productId = input.productId.trim();
+    if (!productId) throw new Error("productId missing");
+    const canonicalLocale = toCanonical(input.locale.trim());
+    if (!canonicalLocale) throw new Error("locale missing");
+
+    const fields: Record<string, string> = {};
+    if (input.name !== undefined) fields.name = input.name;
+    if (input.description !== undefined) fields.description = input.description;
+    if (Object.keys(fields).length === 0) return;
+
+    const client = this.resolveAscClient();
+    const lookup = await this.getAscIapLookup(client, ascAppId);
+    const entry = lookup.get(productId);
+    if (!entry) {
+      throw new Error(`App Store IAP bulunamadı: ${productId}`);
+    }
+
+    const existingLocalization = entry.localizationsByLocale.get(canonicalLocale);
+    if (existingLocalization) {
+      await client.patch(`/v1/inAppPurchaseLocalizations/${existingLocalization.id}`, {
+        data: {
+          id: existingLocalization.id,
+          type: "inAppPurchaseLocalizations",
+          attributes: fields,
+        },
+      });
+
+      entry.localizationsByLocale.set(canonicalLocale, {
+        ...existingLocalization,
+        attributes: {
+          ...(existingLocalization.attributes ?? {}),
+          ...fields,
+          locale: canonicalLocale,
+        },
+      });
+      return;
+    }
+
+    const storeLocale = toStoreLocale(canonicalLocale, "app_store");
+    const createBodyV2 = {
+      data: {
+        type: "inAppPurchaseLocalizations",
+        attributes: {
+          locale: storeLocale,
+          ...fields,
+        },
+        relationships: {
+          inAppPurchaseV2: {
+            data: { id: entry.iapId, type: "inAppPurchasesV2" },
+          },
+        },
+      },
+    };
+
+    const createBodyLegacy = {
+      data: {
+        type: "inAppPurchaseLocalizations",
+        attributes: {
+          locale: storeLocale,
+          ...fields,
+        },
+        relationships: {
+          inAppPurchase: {
+            data: { id: entry.iapId, type: "inAppPurchases" },
+          },
+        },
+      },
+    };
+
+    let response: { data?: { id?: string } } | null = null;
+    try {
+      response = await client.post<{ data?: { id?: string } }>(
+        "/v1/inAppPurchaseLocalizations",
+        createBodyV2
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/already exists|already.*localization|already.*used/i.test(message)) {
+        const freshLookup = await this.getAscIapLookup(client, ascAppId, { forceRefresh: true });
+        const freshEntry = freshLookup.get(productId);
+        const freshLocalization = freshEntry?.localizationsByLocale.get(canonicalLocale);
+        if (freshLocalization) {
+          await client.patch(`/v1/inAppPurchaseLocalizations/${freshLocalization.id}`, {
+            data: {
+              id: freshLocalization.id,
+              type: "inAppPurchaseLocalizations",
+              attributes: fields,
+            },
+          });
+          return;
+        }
+      }
+
+      try {
+        response = await client.post<{ data?: { id?: string } }>(
+          "/v1/inAppPurchaseLocalizations",
+          createBodyLegacy
+        );
+      } catch {
+        throw error;
+      }
+    }
+
+    const createdId = response?.data?.id?.trim();
+    if (createdId) {
+      entry.localizationsByLocale.set(canonicalLocale, {
+        id: createdId,
+        attributes: {
+          locale: canonicalLocale,
+          ...fields,
+        },
+      });
+      return;
+    }
+
+    this.clearAscIapLookup(ascAppId);
+  }
+
+  async updatePlayIapLocalizationFields(
+    app: AppRecord,
+    input: PlayIapLocalizationUpdateInput
+  ): Promise<void> {
+    const packageName = app.androidPackageName;
+    if (!packageName) throw new Error("androidPackageName missing");
+
+    const productId = input.productId.trim();
+    if (!productId) throw new Error("productId missing");
+
+    const canonicalLocale = toCanonical(input.locale.trim());
+    if (!canonicalLocale) throw new Error("locale missing");
+
+    const sanitizedBenefits =
+      input.benefits !== undefined
+        ? input.benefits.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+        : undefined;
+    const hasAnyField =
+      input.title !== undefined ||
+      input.description !== undefined ||
+      sanitizedBenefits !== undefined;
+    if (!hasAnyField) return;
+
+    const client = this.resolveGpcClient();
+    const normalizedType = this.normalizePlayIapType(input.iapType);
+
+    const applyOneTimeProduct = async (): Promise<void> => {
+      const product = await this.getPlayOneTimeProduct(client, packageName, productId);
+      const nextListings = this.mergePlayIapListings(product.listings, canonicalLocale, {
+        title: input.title,
+        description: input.description,
+        benefits: sanitizedBenefits,
+      });
+      const targetTitle = this.getPlayIapTitleForLocale(nextListings, canonicalLocale);
+      if (!targetTitle) {
+        throw new Error(
+          `Play IAP locale title boş: ${productId}/${canonicalLocale}. Bu locale için title da gönderin.`
+        );
+      }
+      const regionsVersion = this.resolvePlayRegionsVersion(product);
+      await this.patchPlayOneTimeProduct(
+        client,
+        packageName,
+        productId,
+        {
+          packageName,
+          productId,
+          listings: nextListings,
+        },
+        regionsVersion
+      );
+    };
+
+    const applySubscription = async (): Promise<void> => {
+      const subscription = await this.getPlaySubscription(client, packageName, productId);
+      const nextListings = this.mergePlayIapListings(subscription.listings, canonicalLocale, {
+        title: input.title,
+        description: input.description,
+        benefits: sanitizedBenefits,
+      });
+      const targetTitle = this.getPlayIapTitleForLocale(nextListings, canonicalLocale);
+      if (!targetTitle) {
+        throw new Error(
+          `Play IAP locale title boş: ${productId}/${canonicalLocale}. Bu locale için title da gönderin.`
+        );
+      }
+      const regionsVersion = this.resolvePlayRegionsVersion(subscription);
+      await this.patchPlaySubscription(
+        client,
+        packageName,
+        productId,
+        {
+          packageName,
+          productId,
+          listings: nextListings,
+        },
+        regionsVersion
+      );
+    };
+
+    if (normalizedType === "one_time") {
+      await applyOneTimeProduct();
+      return;
+    }
+    if (normalizedType === "subscription") {
+      await applySubscription();
+      return;
+    }
+
+    try {
+      await applyOneTimeProduct();
+    } catch (oneTimeError) {
+      const message = oneTimeError instanceof Error ? oneTimeError.message : String(oneTimeError);
+      if (!/404|Not Found|not found/i.test(message)) {
+        throw oneTimeError;
+      }
+      await applySubscription();
     }
   }
 }

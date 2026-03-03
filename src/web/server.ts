@@ -657,6 +657,15 @@ type LocaleChangeInput = {
   fields?: Record<string, string>;
 };
 
+type IapFieldChangeInput = {
+  store: StoreId;
+  productId: string;
+  iapType?: string;
+  locale: string;
+  field: string;
+  newValue: string;
+};
+
 function parseLocaleChanges(raw: unknown[]): LocaleChangeInput[] {
   const result: LocaleChangeInput[] = [];
   for (const item of raw) {
@@ -683,6 +692,42 @@ function parseLocaleChanges(raw: unknown[]): LocaleChangeInput[] {
 
     result.push({ store, locale, action, fields });
   }
+  return result;
+}
+
+function parseIapFieldChanges(raw: unknown[]): IapFieldChangeInput[] {
+  const result: IapFieldChangeInput[] = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const store =
+      row.store === "app_store" || row.store === "play_store"
+        ? (row.store as StoreId)
+        : null;
+    const productId = typeof row.productId === "string" ? row.productId.trim() : "";
+    const locale = typeof row.locale === "string" ? row.locale.trim() : "";
+    const field = typeof row.field === "string" ? row.field.trim() : "";
+    const iapType = typeof row.iapType === "string" ? row.iapType.trim() : undefined;
+    const newValueRaw = row.newValue;
+    const newValue =
+      typeof newValueRaw === "string"
+        ? newValueRaw
+        : newValueRaw === undefined || newValueRaw === null
+          ? ""
+          : String(newValueRaw);
+
+    if (!store || !productId || !locale || !field) continue;
+    result.push({
+      store,
+      productId,
+      iapType,
+      locale,
+      field,
+      newValue,
+    });
+  }
+
   return result;
 }
 
@@ -944,13 +989,14 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
     const appId = parseId(req.params.id);
     const appRow = mustGetApp(appId);
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const rawChanges = Array.isArray(body.changes) ? body.changes : [];
+    const rawIapChanges = Array.isArray(body.iapChanges) ? body.iapChanges : rawChanges;
 
-    const localeChanges = parseLocaleChanges(
-      Array.isArray(body.changes) ? body.changes : []
-    );
+    const localeChanges = parseLocaleChanges(rawChanges);
+    const iapChanges = parseIapFieldChanges(rawIapChanges);
 
-    if (localeChanges.length === 0) {
-      res.status(400).json({ error: "No valid locale changes provided." });
+    if (localeChanges.length === 0 && iapChanges.length === 0) {
+      res.status(400).json({ error: "No valid locale or IAP changes provided." });
       return;
     }
 
@@ -959,6 +1005,8 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
 
     const succeeded: LocaleChangeInput[] = [];
     const failed: Array<LocaleChangeInput & { error: string }> = [];
+    const iapSucceeded: IapFieldChangeInput[] = [];
+    const iapFailed: Array<IapFieldChangeInput & { error: string }> = [];
 
     // ASC — each locale independently, in parallel
     if (ascChanges.length > 0) {
@@ -1028,6 +1076,115 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
       }
     }
 
+    if (iapChanges.length > 0) {
+      type MergedIapChange = {
+        store: StoreId;
+        productId: string;
+        iapType?: string;
+        locale: string;
+        fields: Record<string, string>;
+        originals: IapFieldChangeInput[];
+      };
+
+      const mergedByTarget = new Map<string, MergedIapChange>();
+      for (const change of iapChanges) {
+        const key = `${change.store}::${change.productId}::${change.locale}`;
+        const existing = mergedByTarget.get(key);
+        if (existing) {
+          existing.fields[change.field] = change.newValue;
+          existing.originals.push(change);
+          if (!existing.iapType && change.iapType) {
+            existing.iapType = change.iapType;
+          }
+          continue;
+        }
+        mergedByTarget.set(key, {
+          store: change.store,
+          productId: change.productId,
+          iapType: change.iapType,
+          locale: change.locale,
+          fields: { [change.field]: change.newValue },
+          originals: [change],
+        });
+      }
+
+      const mergedChanges = Array.from(mergedByTarget.values()).sort((a, b) => {
+        if (a.store !== b.store) return a.store.localeCompare(b.store);
+        if (a.productId !== b.productId) return a.productId.localeCompare(b.productId);
+        return a.locale.localeCompare(b.locale);
+      });
+
+      for (const change of mergedChanges) {
+        try {
+          if (change.store === "app_store") {
+            const invalidFields = Object.keys(change.fields).filter(
+              (field) => field !== "name" && field !== "description"
+            );
+            if (invalidFields.length > 0) {
+              throw new Error(
+                `App Store IAP için desteklenmeyen alan(lar): ${invalidFields.join(", ")}`
+              );
+            }
+
+            const name = Object.prototype.hasOwnProperty.call(change.fields, "name")
+              ? change.fields.name
+              : undefined;
+            const description = Object.prototype.hasOwnProperty.call(change.fields, "description")
+              ? change.fields.description
+              : undefined;
+            await storeApi.updateAscIapLocalizationFields(appRow, {
+              productId: change.productId,
+              locale: change.locale,
+              name,
+              description,
+            });
+          } else {
+            const invalidFields = Object.keys(change.fields).filter(
+              (field) =>
+                field !== "title" && field !== "description" && field !== "benefits"
+            );
+            if (invalidFields.length > 0) {
+              throw new Error(
+                `Play Store IAP için desteklenmeyen alan(lar): ${invalidFields.join(", ")}`
+              );
+            }
+
+            const title = Object.prototype.hasOwnProperty.call(change.fields, "title")
+              ? change.fields.title
+              : undefined;
+            const description = Object.prototype.hasOwnProperty.call(change.fields, "description")
+              ? change.fields.description
+              : undefined;
+            const benefits = Object.prototype.hasOwnProperty.call(change.fields, "benefits")
+              ? change.fields.benefits
+                  .split(/\r?\n/)
+                  .map((entry) => entry.trim())
+                  .filter((entry) => entry.length > 0)
+              : undefined;
+
+            await storeApi.updatePlayIapLocalizationFields(appRow, {
+              productId: change.productId,
+              iapType: change.iapType,
+              locale: change.locale,
+              title,
+              description,
+              benefits,
+            });
+          }
+
+          iapSucceeded.push(...change.originals);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          for (const original of change.originals) {
+            iapFailed.push({
+              ...original,
+              error: errorMessage,
+            });
+          }
+        }
+      }
+    }
+
     // Update DB for succeeded changes
     if (succeeded.length > 0) {
       const ascSucceeded = succeeded.filter((c) => c.store === "app_store");
@@ -1052,6 +1209,48 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
       }
     }
 
+    const iapRefreshErrors: Array<{ store: StoreId; message: string }> = [];
+    const iapSucceededStores = new Set(iapSucceeded.map((change) => change.store));
+    if (iapSucceededStores.has("app_store")) {
+      try {
+        const appStoreCatalog = await storeApi.fetchAppStoreIapCatalog(appRow);
+        repo.replaceStoreIaps(
+          appId,
+          "app_store",
+          appStoreCatalog.items.map((item) => ({
+            productId: item.productId,
+            detail: item,
+            syncedAt: appStoreCatalog.fetchedAt,
+          }))
+        );
+      } catch (error) {
+        iapRefreshErrors.push({
+          store: "app_store",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (iapSucceededStores.has("play_store")) {
+      try {
+        const playStoreCatalog = await storeApi.fetchPlayStoreIapCatalog(appRow);
+        repo.replaceStoreIaps(
+          appId,
+          "play_store",
+          playStoreCatalog.items.map((item) => ({
+            productId: item.productId,
+            detail: item,
+            syncedAt: playStoreCatalog.fetchedAt,
+          }))
+        );
+      } catch (error) {
+        iapRefreshErrors.push({
+          store: "play_store",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // Build response
     const rows = repo.listStoreLocales(appId);
     const appStoreLocales = rows
@@ -1065,6 +1264,9 @@ app.post("/api/apps/:id/locales/apply", async (req, res, next) => {
       appId,
       succeeded,
       failed,
+      iapSucceeded,
+      iapFailed,
+      iapRefreshErrors,
       appStoreLocales,
       playStoreLocales,
       completedAt: new Date().toISOString(),

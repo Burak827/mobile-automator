@@ -2216,16 +2216,10 @@ export default function App() {
         fieldOnlyByLocale.get(localeKey)!.push(fe);
       }
 
-      if (localeEntries.length === 0 && fieldOnlyByLocale.size === 0) {
-        if (iapEntries.length > 0) {
-          pushStatus(
-            `IAP değişiklikleri henüz güncelleme akışına bağlı değil (${iapEntries.length} kayıt beklemede).`
-          );
-        } else {
-          pushStatus(
-            storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
-          );
-        }
+      if (localeEntries.length === 0 && fieldOnlyByLocale.size === 0 && iapEntries.length === 0) {
+        pushStatus(
+          storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
+        );
         return;
       }
 
@@ -2294,21 +2288,51 @@ export default function App() {
         changes.push({ store: first.store, locale: first.locale, action: 'update', fields });
       }
 
+      const iapChanges = iapEntries.map((entry) => ({
+        store: entry.store,
+        productId: entry.productId,
+        iapType: entry.iapType,
+        locale: entry.locale,
+        field: entry.field,
+        newValue: entry.newValue,
+      }));
+
       type ApplyResponse = {
         succeeded: Array<{ store: StoreId; locale: string; action: string }>;
         failed: Array<{ store: StoreId; locale: string; action: string; error: string }>;
+        iapSucceeded?: Array<{
+          store: StoreId;
+          productId: string;
+          iapType?: string;
+          locale: string;
+          field: string;
+          newValue: string;
+        }>;
+        iapFailed?: Array<{
+          store: StoreId;
+          productId: string;
+          iapType?: string;
+          locale: string;
+          field: string;
+          newValue: string;
+          error: string;
+        }>;
+        iapRefreshErrors?: Array<{ store: StoreId; message: string }>;
         appStoreLocales: string[];
         playStoreLocales: string[];
       };
 
       setIsApplyingConfig(true);
       try {
-        pushStatus(`${changes.length} değişiklik uygulanıyor...`);
+        pushStatus(`${changes.length + iapChanges.length} değişiklik uygulanıyor...`);
 
         const result = await api<ApplyResponse>(
           `/api/apps/${selectedAppId}/locales/apply`,
-          { method: 'POST', body: JSON.stringify({ changes }) }
+          { method: 'POST', body: JSON.stringify({ changes, iapChanges }) }
         );
+
+        const iapSucceeded = result.iapSucceeded ?? [];
+        const iapFailed = result.iapFailed ?? [];
 
         // Remove succeeded changes from pending
         setPendingStoreChanges((prev) => {
@@ -2327,28 +2351,40 @@ export default function App() {
               }
             }
           }
+
+          for (const s of iapSucceeded) {
+            const key = toStoreIapChangeKey(s.store, s.productId, s.locale, s.field);
+            delete next[key];
+          }
           return next;
         });
 
-        if (result.failed.length > 0) {
+        const totalSucceeded = result.succeeded.length + iapSucceeded.length;
+        const totalFailed = result.failed.length + iapFailed.length;
+
+        if (totalFailed > 0) {
           pushStatus(
-            `Kısmi başarı: ${result.succeeded.length} başarılı, ${result.failed.length} başarısız.`
+            `Kısmi başarı: ${totalSucceeded} başarılı, ${totalFailed} başarısız.`
           );
           for (const f of result.failed) {
             pushStatus(`  HATA [${f.store}/${f.locale}/${f.action}]: ${f.error}`);
           }
+          for (const f of iapFailed) {
+            pushStatus(`  HATA [${f.store}/${f.productId}/${f.locale}/${f.field}]: ${f.error}`);
+          }
         } else {
-          pushStatus(`${result.succeeded.length} değişiklik uygulandı.`);
+          pushStatus(`${totalSucceeded} değişiklik uygulandı.`);
         }
 
-        if (iapEntries.length > 0) {
-          pushStatus(
-            `Not: ${iapEntries.length} IAP değişikliği kuyrukta bekliyor (henüz apply edilmedi).`
-          );
+        for (const warning of result.iapRefreshErrors ?? []) {
+          pushStatus(`IAP sync uyarısı [${warning.store}]: ${warning.message}`);
         }
 
         // Auto-sync affected stores via shared routine
-        const succeededStores = new Set(result.succeeded.map((s) => s.store));
+        const succeededStores = new Set<StoreId>([
+          ...result.succeeded.map((s) => s.store),
+          ...iapSucceeded.map((s) => s.store),
+        ]);
         if (succeededStores.size > 0) {
           const storeScope =
             succeededStores.has('app_store') && succeededStores.has('play_store')
@@ -2360,7 +2396,7 @@ export default function App() {
         }
       } catch (error) {
         pushStatus(
-          `Locale değişikliği sırasında hata: ${error instanceof Error ? error.message : String(error)}`
+          `Değişiklik uygulanırken hata: ${error instanceof Error ? error.message : String(error)}`
         );
       } finally {
         setIsApplyingConfig(false);
