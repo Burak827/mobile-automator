@@ -33,6 +33,7 @@ import {
 import {
   translateWithOpenAI,
   shortenWithOpenAI,
+  verifyTranslationWithOpenAI,
   type OpenAIConfig,
 } from "../translate.js";
 
@@ -1486,6 +1487,26 @@ async function shortenWithRetry(
   throw lastError;
 }
 
+async function verifyWithRetry(
+  args: Parameters<typeof verifyTranslationWithOpenAI>[0],
+  maxRetries = 5
+): Promise<{ verdict: "evet" | "hayir"; raw: string }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await verifyTranslationWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      if (status !== 429) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
 app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
   try {
     const appId = parseId(req.params.id);
@@ -1502,6 +1523,7 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
       ? (body.locales as unknown[]).filter((l): l is string => typeof l === "string")
       : null;
     const masterPrompt = typeof body.masterPrompt === "string" ? body.masterPrompt.trim() : "";
+    const verifyTranslations = parseBoolean(body.verify, false);
     const mode = body.mode === "update_existing" ? "update_existing" : "generate_missing";
     const requestedFields = Array.isArray(body.fields)
       ? (body.fields as unknown[]).filter((f): f is string => typeof f === "string")
@@ -1642,6 +1664,12 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
     writeLine({ type: "start", totalLocales: localeWorkList.length, sourceLocale, store });
 
     const DELAY_BETWEEN_CALLS_MS = 500;
+    const translatedFieldQueue: Array<{
+      locale: string;
+      field: string;
+      value: string;
+      appTitle?: string;
+    }> = [];
 
     // Helper: translate a single field with retry + shorten logic
     async function translateField(
@@ -1791,6 +1819,14 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
         const existsInStore = repo
           .listStoreLocales(appId)
           .some((r) => r.store === store && r.locale === lw.locale);
+        for (const translatedField of translatedFields) {
+          translatedFieldQueue.push({
+            locale: lw.locale,
+            field: translatedField.field,
+            value: translatedField.value,
+            appTitle,
+          });
+        }
         writeLine({
           type: "locale_done",
           locale: lw.locale,
@@ -1802,6 +1838,67 @@ app.post("/api/apps/:id/generate-translations", async (req, res, next) => {
           })),
         });
       }
+    }
+
+    if (verifyTranslations) {
+      const verifyStoreName = STORE_RULES[store].displayName;
+      const verifyChecks = translatedFieldQueue.filter((item) => {
+        const sourceText = sourceTexts.get(item.field) ?? "";
+        return sourceText.trim().length > 0 && item.value.trim().length > 0;
+      });
+
+      writeLine({
+        type: "verify_start",
+        totalChecks: verifyChecks.length,
+      });
+
+      const verifyFailed: Array<{
+        locale: string;
+        field: string;
+        reason: string;
+        answer?: string;
+      }> = [];
+
+      for (const item of verifyChecks) {
+        try {
+          const sourceText = sourceTexts.get(item.field) ?? "";
+          const verifyResult = await verifyWithRetry({
+            config: aiConfig,
+            sourceLocale,
+            targetLocale: item.locale,
+            sourceText,
+            translatedText: item.value,
+            fieldName: item.field,
+            storeName: verifyStoreName,
+            appTitle: item.appTitle,
+            masterPrompt: masterPrompt || undefined,
+          });
+
+          if (verifyResult.verdict !== "evet") {
+            verifyFailed.push({
+              locale: item.locale,
+              field: item.field,
+              reason: "AI sonucu hayir",
+              answer: verifyResult.raw,
+            });
+          }
+        } catch (err: unknown) {
+          verifyFailed.push({
+            locale: item.locale,
+            field: item.field,
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        await new Promise((r) => setTimeout(r, DELAY_BETWEEN_CALLS_MS));
+      }
+
+      writeLine({
+        type: "verify_done",
+        totalChecks: verifyChecks.length,
+        failedCount: verifyFailed.length,
+        failed: verifyFailed,
+      });
     }
 
     writeLine({

@@ -9,52 +9,71 @@ type OpenAIMessage = {
   content: string;
 };
 
+type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+
+function supportsCustomTemperature(model: string): boolean {
+  return !model.trim().toLowerCase().startsWith("gpt-5");
+}
+
 async function requestOpenAI(options: {
   config: OpenAIConfig;
   messages: OpenAIMessage[];
   temperature?: number;
+  reasoningEffort?: ReasoningEffort;
 }): Promise<string> {
   const { config, messages } = options;
   const baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-
-  const payload = {
+  const preferredTemperature = options.temperature ?? 0.2;
+  const basePayload = {
     model: config.model,
     messages,
-    temperature: options.temperature ?? 0.2,
+    reasoning_effort: options.reasoningEffort ?? "xhigh",
   };
+  const payload = supportsCustomTemperature(config.model)
+    ? { ...basePayload, temperature: preferredTemperature }
+    : basePayload;
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  const runRequest = async (requestPayload: Record<string, unknown>) =>
+    fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestPayload),
+    });
 
-  const raw = await response.text();
+  let response = await runRequest(payload);
+  let raw = await response.text();
+
+  // Safety fallback: if backend/model rejects temperature, retry once without it.
+  if (
+    !response.ok &&
+    response.status === 400 &&
+    Object.prototype.hasOwnProperty.call(payload, "temperature") &&
+    raw.includes("Unsupported value: 'temperature'")
+  ) {
+    response = await runRequest(basePayload);
+    raw = await response.text();
+  }
+
   if (!response.ok) {
-    let message = `OpenAI request failed (${response.status} ${response.statusText})`;
+    let detail = raw;
     if (raw) {
       try {
         const errorPayload = JSON.parse(raw);
-        const detail = errorPayload?.error?.message ?? raw;
-        message = `${message}: ${detail}`;
+        detail = errorPayload?.error?.message ?? raw;
       } catch {
-        message = `${message}: ${raw}`;
+        detail = raw;
       }
     }
-    const error = new Error(message) as Error & {
-      status?: number;
-      retryAfterMs?: number;
-    };
+    const message = `OpenAI request failed (${response.status} ${response.statusText}): ${detail}`;
+    const error = new Error(message) as Error & { status?: number; retryAfterMs?: number };
     error.status = response.status;
     const retryAfter = response.headers.get("retry-after");
     if (retryAfter) {
       const retryAfterSeconds = Number(retryAfter);
-      if (Number.isFinite(retryAfterSeconds)) {
-        error.retryAfterMs = retryAfterSeconds * 1000;
-      }
+      if (Number.isFinite(retryAfterSeconds)) error.retryAfterMs = retryAfterSeconds * 1000;
     }
     throw error;
   }
@@ -152,4 +171,80 @@ export async function shortenWithOpenAI(options: {
     ],
     temperature: 0.2,
   });
+}
+
+function normalizeVerifyAnswer(raw: string): "evet" | "hayir" | null {
+  const firstToken = raw
+    .trim()
+    .split(/\s+/)[0]
+    ?.toLowerCase()
+    .replace(/[^\p{L}]/gu, "") ?? "";
+
+  if (!firstToken) return null;
+  if (firstToken === "evet" || firstToken === "yes" || firstToken === "y") return "evet";
+  if (
+    firstToken === "hayir" ||
+    firstToken === "hayır" ||
+    firstToken === "no" ||
+    firstToken === "n"
+  ) {
+    return "hayir";
+  }
+  return null;
+}
+
+export async function verifyTranslationWithOpenAI(options: {
+  config: OpenAIConfig;
+  sourceLocale: string;
+  targetLocale: string;
+  sourceText: string;
+  translatedText: string;
+  fieldName?: string;
+  storeName?: string;
+  appTitle?: string;
+  masterPrompt?: string;
+}): Promise<{
+  verdict: "evet" | "hayir";
+  raw: string;
+}> {
+  const store = options.storeName ?? "App Store";
+  const fieldHint = options.fieldName ? ` (${options.fieldName})` : "";
+  const titleContext = options.appTitle
+    ? `Uygulama adı hedef locale'de "${options.appTitle}".`
+    : "";
+  const masterHint = options.masterPrompt
+    ? ` Ek talimat: ${options.masterPrompt}`
+    : "";
+
+  const raw = await requestOpenAI({
+    config: options.config,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a strict translation quality checker for app store listing text. " +
+          "You must answer with only one word: evet or hayir. " +
+          "Do not add any explanation, punctuation, or extra tokens." +
+          masterHint,
+      },
+      {
+        role: "user",
+        content:
+          `Kaynak dil: ${options.sourceLocale}. Hedef dil: ${options.targetLocale}. Store: ${store}${fieldHint}. ` +
+          `${titleContext} ` +
+          "Aşağıdaki çeviri, kaynak metnin iyi ve anlamı koruyan bir çevirisi mi? " +
+          "Sadece evet veya hayir cevabı ver.\n\n" +
+          `Kaynak metin:\n${options.sourceText}\n\n` +
+          `Çevrilmiş metin:\n${options.translatedText}`,
+      },
+    ],
+    temperature: 0,
+  });
+
+  const verdict = normalizeVerifyAnswer(raw);
+  if (!verdict) {
+    throw new Error(`Verify yanıtı geçersiz: "${raw}"`);
+  }
+
+  return { verdict, raw };
 }

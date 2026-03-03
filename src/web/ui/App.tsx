@@ -5,7 +5,6 @@ import AppDetailsPanel from './components/organisms/AppDetailsPanel';
 import AppListSidebar from './components/organisms/AppListSidebar';
 import ChangeQueueDrawer from './components/organisms/ChangeQueueDrawer';
 import CreateAppDialog from './components/organisms/CreateAppDialog';
-import FieldUpdaterDialog from './components/organisms/FieldUpdaterDialog';
 import GenerateTranslationsDialog from './components/organisms/GenerateTranslationsDialog';
 import HeaderBar from './components/organisms/HeaderBar';
 import RnLocalesDialog from './components/organisms/RnLocalesDialog';
@@ -542,6 +541,15 @@ type StoreDiffResponse = {
   skipped: Array<{ locale: string; reason: string }>;
 };
 
+type GenerateDialogStartPayload = {
+  store: StoreId;
+  mode: 'generate_missing' | 'update_existing';
+  selectedLocales: string[];
+  selectedFields: string[];
+  masterPrompt: string;
+  verify: boolean;
+};
+
 // Raw server response types (server uses iosLocale/playLocale naming)
 type RawIosToPlayResponse = {
   entries: Array<{ iosLocale: string; playLocale: string; isNewLocale: boolean; fields: StoreDiffField[] }>;
@@ -589,8 +597,8 @@ export default function App() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
-  const [generateModalStore, setGenerateModalStore] = useState<StoreId | null>(null);
-  const [isFieldUpdaterOpen, setIsFieldUpdaterOpen] = useState(false);
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [generateModalStore, setGenerateModalStore] = useState<StoreId>('app_store');
   const [isRnLocalesOpen, setIsRnLocalesOpen] = useState(false);
   const [rnLocalesStore, setRnLocalesStore] = useState<StoreId>('app_store');
 
@@ -610,8 +618,10 @@ export default function App() {
   const [isIosLoading, setIsIosLoading] = useState(false);
   const [isPlayLoading, setIsPlayLoading] = useState(false);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
+  const [isConsoleFollowEnabled, setIsConsoleFollowEnabled] = useState(true);
   const [isChangeDrawerOpen, setIsChangeDrawerOpen] = useState(false);
   const [pendingStoreChanges, setPendingStoreChanges] = useState<PendingStoreChangeMap>({});
+  const consoleBoxRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
     selectedAppIdRef.current = selectedAppId;
@@ -798,6 +808,17 @@ export default function App() {
     [statusLogs]
   );
 
+  useEffect(() => {
+    if (!isConsoleExpanded || !isConsoleFollowEnabled) return;
+    const element = consoleBoxRef.current;
+    if (!element) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isConsoleExpanded, isConsoleFollowEnabled, statusLogs.length]);
+
   const localeOptions = useMemo<LocaleCatalogEntry[]>(() => {
     const fallback: LocaleCatalogEntry[] = [
       { locale: 'en-US', iosSupported: true, androidSupported: true },
@@ -816,19 +837,24 @@ export default function App() {
     return base;
   }, [appConfig.sourceLocale, createForm.sourceLocale, localeCatalog]);
 
-  const generateMissingLocales = useMemo(() => {
-    if (!generateModalStore) return [];
-    const supported = localeCatalog
-      .filter((e) =>
-        generateModalStore === 'app_store' ? e.iosSupported : e.androidSupported
-      )
-      .map((e) => e.locale);
-    const existing = new Set(
-      generateModalStore === 'app_store' ? iosLocales : playLocales
-    );
+  const generateMissingLocalesByStore = useMemo<Record<StoreId, string[]>>(() => {
     const source = selectedApp?.sourceLocale || 'en-US';
-    return supported.filter((l) => l !== source && !existing.has(l)).sort();
-  }, [generateModalStore, localeCatalog, iosLocales, playLocales, selectedApp]);
+
+    const iosSupported = localeCatalog
+      .filter((entry) => entry.iosSupported)
+      .map((entry) => entry.locale);
+    const playSupported = localeCatalog
+      .filter((entry) => entry.androidSupported)
+      .map((entry) => entry.locale);
+
+    const iosExisting = new Set(iosLocales);
+    const playExisting = new Set(playLocales);
+
+    return {
+      app_store: iosSupported.filter((locale) => locale !== source && !iosExisting.has(locale)).sort(),
+      play_store: playSupported.filter((locale) => locale !== source && !playExisting.has(locale)).sort(),
+    };
+  }, [iosLocales, localeCatalog, playLocales, selectedApp]);
 
   const hasConfigChanges = useMemo(() => {
     if (!selectedApp) return false;
@@ -845,6 +871,16 @@ export default function App() {
     () => Boolean((selectedApp?.androidPackageName || '').trim()),
     [selectedApp]
   );
+
+  useEffect(() => {
+    if (!showIosPanel && generateModalStore === 'app_store' && showPlayPanel) {
+      setGenerateModalStore('play_store');
+      return;
+    }
+    if (!showPlayPanel && generateModalStore === 'play_store' && showIosPanel) {
+      setGenerateModalStore('app_store');
+    }
+  }, [generateModalStore, showIosPanel, showPlayPanel]);
 
   const handleReloadMeta = useCallback(async () => {
     try {
@@ -1103,6 +1139,7 @@ export default function App() {
       masterPrompt: string,
       mode?: 'generate_missing' | 'update_existing',
       fields?: string[],
+      verifyEnabled = true,
     ) => {
       if (!selectedAppId) return;
 
@@ -1114,11 +1151,13 @@ export default function App() {
           ? `🔄 ${storeName} field güncelleniyor (${fields?.length ?? 0} field)...`
           : `✨ ${storeName} çevirileri oluşturuluyor (${locales.length} locale)...`
       );
+      pushStatus(`Doğrulama: ${verifyEnabled ? 'Açık' : 'Kapalı'}`);
 
       try {
         const fetchBody: Record<string, unknown> = {
           store,
           masterPrompt: masterPrompt || undefined,
+          verify: verifyEnabled,
         };
         if (isUpdate) {
           fetchBody.mode = 'update_existing';
@@ -1195,7 +1234,7 @@ export default function App() {
               }
             } else if (type === 'locale_done') {
               const locale = event.locale as string;
-              const isNewLocale = event.isNewLocale as boolean;
+              const isNewLocale = Boolean(event.isNewLocale);
               const fields = event.fields as Array<{
                 field: string;
                 value: string;
@@ -1207,6 +1246,46 @@ export default function App() {
               pushStatus(`⚠ ${event.locale}: Atlandı — ${event.reason}`);
             } else if (type === 'error') {
               pushStatus(`✗ ${event.locale}/${event.field}: ${event.error}`);
+            } else if (type === 'verify_start') {
+              const totalChecks =
+                typeof event.totalChecks === 'number' ? event.totalChecks : 0;
+              pushStatus(`🔎 Verify başladı (${totalChecks} alan)`);
+            } else if (type === 'verify_done') {
+              const failedRaw = Array.isArray(event.failed) ? event.failed : [];
+              const failed = failedRaw
+                .map((row) => {
+                  if (!row || typeof row !== 'object') return null;
+                  const item = row as {
+                    locale?: unknown;
+                    field?: unknown;
+                    reason?: unknown;
+                    answer?: unknown;
+                  };
+                  const locale =
+                    typeof item.locale === 'string' ? item.locale.trim() : '';
+                  const field = typeof item.field === 'string' ? item.field.trim() : '';
+                  const reason =
+                    typeof item.reason === 'string' ? item.reason.trim() : '';
+                  const answer =
+                    typeof item.answer === 'string' ? item.answer.trim() : '';
+                  if (!locale || !field) return null;
+                  return { locale, field, reason, answer };
+                })
+                .filter(
+                  (item): item is { locale: string; field: string; reason: string; answer: string } =>
+                    Boolean(item)
+                );
+
+              if (failed.length === 0) {
+                pushStatus('✅ Verify tamamlandı: tüm alanlar doğrulandı.');
+              } else {
+                pushStatus(`⚠ Verify tamamlandı: ${failed.length} alan doğrulanamadı.`);
+                for (const item of failed) {
+                  const reasonText = item.reason || 'AI sonucu hayir';
+                  const answerText = item.answer ? ` (yanıt: ${item.answer})` : '';
+                  pushStatus(`  ${item.locale}/${item.field}: ${reasonText}${answerText}`);
+                }
+              }
             } else if (type === 'done') {
               pushStatus(`✨ Çeviri tamamlandı (${collectedLocales.length} locale)`);
             } else if (type === 'fatal') {
@@ -1244,19 +1323,25 @@ export default function App() {
   );
 
   const handleStartGenerate = useCallback(
-    (locales: string[], masterPrompt: string) => {
-      const store = generateModalStore;
-      if (!store) return;
-      setGenerateModalStore(null);
-      void handleGenerateTranslations(store, locales, masterPrompt);
-    },
-    [generateModalStore, handleGenerateTranslations]
-  );
-
-  const handleFieldUpdaterStart = useCallback(
-    (store: StoreId, fields: string[], masterPrompt: string) => {
-      setIsFieldUpdaterOpen(false);
-      void handleGenerateTranslations(store, [], masterPrompt, 'update_existing', fields);
+    ({
+      store,
+      mode,
+      selectedLocales,
+      selectedFields,
+      masterPrompt,
+      verify,
+    }: GenerateDialogStartPayload) => {
+      setIsGenerateModalOpen(false);
+      setGenerateModalStore(store);
+      const requestLocales = mode === 'generate_missing' ? selectedLocales : [];
+      void handleGenerateTranslations(
+        store,
+        requestLocales,
+        masterPrompt,
+        mode,
+        selectedFields,
+        verify
+      );
     },
     [handleGenerateTranslations]
   );
@@ -1278,6 +1363,15 @@ export default function App() {
     setRnLocalesStore('app_store');
     setIsRnLocalesOpen(true);
   }, []);
+
+  const handleOpenGenerateModal = useCallback(() => {
+    if (showIosPanel) {
+      setGenerateModalStore('app_store');
+    } else if (showPlayPanel) {
+      setGenerateModalStore('play_store');
+    }
+    setIsGenerateModalOpen(true);
+  }, [showIosPanel, showPlayPanel]);
 
   const handleExportRnLocales = useCallback(async () => {
     if (!selectedAppId) return;
@@ -1998,9 +2092,7 @@ export default function App() {
             onSubmitConfig={(event) => {
               void handleUpdateConfigSubmit(event);
             }}
-            onGenerateAppStore={() => setGenerateModalStore('app_store')}
-            onGeneratePlay={() => setGenerateModalStore('play_store')}
-            onFieldUpdater={() => setIsFieldUpdaterOpen(true)}
+            onOpenGenerateModal={handleOpenGenerateModal}
             onCopyIosToPlay={() => {
               void handleCopyIosToPlay();
             }}
@@ -2084,16 +2176,26 @@ export default function App() {
       <section className={`console-dock ${isConsoleExpanded ? 'expanded' : 'collapsed'} ${isChangeDrawerOpen ? 'changes-open' : ''}`}>
         <div className="card-head console-head">
           <h3>Konsol</h3>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setIsConsoleExpanded((prev) => !prev)}
-          >
-            {isConsoleExpanded ? 'Küçült' : 'Büyüt'}
-          </Button>
+          <div className="console-head-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              className="console-follow-btn"
+              onClick={() => setIsConsoleFollowEnabled((prev) => !prev)}
+            >
+              {isConsoleFollowEnabled ? 'Takip Açık' : 'Takip Kapalı'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsConsoleExpanded((prev) => !prev)}
+            >
+              {isConsoleExpanded ? 'Küçült' : 'Büyüt'}
+            </Button>
+          </div>
         </div>
         {isConsoleExpanded ? (
-          <pre className="code-box console-box">{statusLogs.join('\n') || latestStatusLine}</pre>
+          <pre ref={consoleBoxRef} className="code-box console-box">{statusLogs.join('\n') || latestStatusLine}</pre>
         ) : (
           <div className="console-line">{latestStatusLine}</div>
         )}
@@ -2120,22 +2222,17 @@ export default function App() {
       />
 
       <GenerateTranslationsDialog
-        isOpen={generateModalStore !== null}
-        store={generateModalStore ?? 'app_store'}
-        missingLocales={generateMissingLocales}
-        onClose={() => setGenerateModalStore(null)}
+        isOpen={isGenerateModalOpen}
+        store={generateModalStore}
+        missingLocalesByStore={generateMissingLocalesByStore}
+        existingLocalesByStore={{ app_store: iosLocales, play_store: playLocales }}
+        sourceLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}
+        canGenerateIos={showIosPanel}
+        canGeneratePlay={showPlayPanel}
+        onStoreChange={setGenerateModalStore}
+        onClose={() => setIsGenerateModalOpen(false)}
         onStart={handleStartGenerate}
         isRunning={isApplyingConfig}
-      />
-
-      <FieldUpdaterDialog
-        isOpen={isFieldUpdaterOpen}
-        onClose={() => setIsFieldUpdaterOpen(false)}
-        onStart={handleFieldUpdaterStart}
-        isRunning={isApplyingConfig}
-        iosLocales={iosLocales}
-        playLocales={playLocales}
-        sourceLocale={selectedApp?.sourceLocale || 'en-US'}
       />
 
       <RnLocalesDialog
