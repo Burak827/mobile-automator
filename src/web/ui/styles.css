@@ -167,6 +167,9 @@ p {
 
 .placeholder-card {
   min-height: 143px;
+  p {
+    font-size: small;
+  }
 }
 
 .meta-grid {
@@ -446,6 +449,7 @@ button:hover {
   border: 1px dashed #c9c1b0;
   border-radius: 10px;
   background: #fff;
+  font-size: small;
 }
 
 .store-panel {
@@ -933,6 +937,7 @@ button:hover {
 .changes-drawer-list {
   padding: 8px 12px;
   overflow: auto;
+  font-size: small;
 }
 
 .change-list {
