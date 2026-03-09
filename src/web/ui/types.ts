@@ -180,6 +180,96 @@ export type IapListPayload = {
   };
 };
 
+export type ScreenshotPalettePayload = {
+  accent: string;
+  bgDark: string;
+  bgInk: string;
+  cream: string;
+  muted: string;
+};
+
+export type ScreenshotSlotPaletteMapPayload = Partial<Record<number, ScreenshotPalettePayload>>;
+export type ScreenshotSlotTitleMapPayload = Partial<Record<number, string>>;
+export type ScreenshotSlotTitleExtraLineColorsMapPayload = Partial<Record<number, string[]>>;
+export type ScreenshotSlotTitleLineGapMapPayload = Partial<Record<number, number>>;
+export type ScreenshotTitleTypographyPayload = {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+};
+export type ScreenshotSlotTitleTypographyMapPayload =
+  Partial<Record<number, ScreenshotTitleTypographyPayload>>;
+
+export type ScreenshotHeroPhonePosePayload = {
+  rotateX: number;
+  rotateY: number;
+  rotateZ: number;
+};
+
+export type ScreenshotHeroPhoneShapePayload = {
+  widthMm: number;
+  lengthMm: number;
+  thicknessMm: number;
+  edgeSmoothnessMm: number;
+};
+
+export type ScreenshotHeroPhoneLocationPayload = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ScreenshotRendererPayload = {
+  template: string;
+  engine: string;
+  runtime?: string;
+  canvasSize: { width: number; height: number };
+  note?: string;
+};
+
+export type ScreenshotGenerateResponse = {
+  appId: number;
+  store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  locale: string;
+  slot: number;
+  title: string;
+  palette?: ScreenshotPalettePayload;
+  heroPhonePose?: ScreenshotHeroPhonePosePayload | null;
+  heroPhoneShape?: ScreenshotHeroPhoneShapePayload | null;
+  heroPhoneLocation?: ScreenshotHeroPhoneLocationPayload | null;
+  heroCameraMode?: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
+  stagedInputPath: string;
+  outputPath: string;
+  message: string;
+  renderer?: ScreenshotRendererPayload;
+};
+
+export type ScreenshotPresetPayload = {
+  store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  label: string;
+  palette: ScreenshotPalettePayload;
+  slotPalettes?: ScreenshotSlotPaletteMapPayload;
+  slotTitles?: ScreenshotSlotTitleMapPayload;
+  slotTitleExtraLineColors?: ScreenshotSlotTitleExtraLineColorsMapPayload;
+  slotTitleLineGaps?: ScreenshotSlotTitleLineGapMapPayload;
+  slotTitleTypography?: ScreenshotSlotTitleTypographyMapPayload;
+  heroPhonePose: ScreenshotHeroPhonePosePayload | null;
+  heroPhoneShape: ScreenshotHeroPhoneShapePayload | null;
+  heroPhoneLocation: ScreenshotHeroPhoneLocationPayload | null;
+  heroCameraMode: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
+  updatedAt: string;
+};
+
+export type ScreenshotPresetListResponse = {
+  appId: number;
+  presets: ScreenshotPresetPayload[];
+};
+
+export type ScreenshotPresetResponse = {
+  appId: number;
+  preset: ScreenshotPresetPayload;
+};
+
 export type StoreLocaleDetailPayload = {
   appId: number;
   store: StoreId;

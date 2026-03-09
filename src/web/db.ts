@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { type StoreId } from "./storeRules.js";
+import { type ScreenshotStore } from "./screenshotTemplates/screenshotStores.js";
 
 export type AppRecord = {
   id: number;
@@ -67,6 +68,13 @@ export type SyncJobRecord = {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+};
+
+export type ScreenshotPresetRecord = {
+  appId: number;
+  store: ScreenshotStore;
+  paletteJson: string;
+  updatedAt: string;
 };
 
 export type CreateSyncJobInput = {
@@ -164,6 +172,15 @@ function parseStoreIapRow(row: Record<string, unknown>): StoreIapRecord {
   };
 }
 
+function parseScreenshotPresetRow(row: Record<string, unknown>): ScreenshotPresetRecord {
+  return {
+    appId: Number(row.app_id),
+    store: String(row.store) as ScreenshotStore,
+    paletteJson: String(row.palette_json ?? "{}"),
+    updatedAt: String(row.updated_at),
+  };
+}
+
 export class MobileAutomatorRepository {
   private db: Database.Database;
 
@@ -257,9 +274,20 @@ export class MobileAutomatorRepository {
         FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS screenshot_presets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        store TEXT NOT NULL CHECK (store IN ('ios', 'play_store')),
+        palette_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(app_id, store),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_store_locales_app_store ON store_locales(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_locale_details_app_store ON store_locale_details(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_iaps_app_store ON store_iaps(app_id, store);
+      CREATE INDEX IF NOT EXISTS idx_screenshot_presets_app ON screenshot_presets(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_naming_overrides_app ON naming_overrides(app_id);
       CREATE INDEX IF NOT EXISTS idx_sync_jobs_app ON sync_jobs(app_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sync_job_logs_job ON sync_job_logs(job_id, created_at ASC);
@@ -576,6 +604,55 @@ export class MobileAutomatorRepository {
 
     tx();
     return this.listStoreIaps(appId, store);
+  }
+
+  listScreenshotPresets(appId: number): ScreenshotPresetRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT app_id, store, palette_json, updated_at
+         FROM screenshot_presets
+         WHERE app_id = ?
+         ORDER BY store ASC`
+      )
+      .all(appId) as Array<Record<string, unknown>>;
+
+    return rows.map(parseScreenshotPresetRow);
+  }
+
+  getScreenshotPreset(
+    appId: number,
+    store: ScreenshotStore
+  ): ScreenshotPresetRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT app_id, store, palette_json, updated_at
+         FROM screenshot_presets
+         WHERE app_id = ? AND store = ?`
+      )
+      .get(appId, store) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return parseScreenshotPresetRow(row);
+  }
+
+  upsertScreenshotPreset(
+    appId: number,
+    store: ScreenshotStore,
+    palette: unknown
+  ): ScreenshotPresetRecord {
+    const updatedAt = nowIso();
+    const paletteJson = JSON.stringify(palette ?? {});
+
+    this.db
+      .prepare(
+        `INSERT INTO screenshot_presets (app_id, store, palette_json, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(app_id, store) DO UPDATE SET
+           palette_json = excluded.palette_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(appId, store, paletteJson, updatedAt);
+
+    return this.getScreenshotPreset(appId, store)!;
   }
 
   listNamingOverrides(appId: number): NamingRecord[] {

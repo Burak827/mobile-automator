@@ -64,6 +64,21 @@ npm run web:api
 - Cross-store copy: copy locale data from iOS to Play Store or Play Store to iOS
 - Apple CFBundleList JSON download for `InfoPlist.strings` generation
 - Locale add/remove/update: manage locale set and apply field-level updates per locale
+- Canvas tabanli screenshot generation for iOS and Play Store
+
+### Screenshot Renderer
+
+Primary path for screenshots is now the shared canvas renderer:
+- Upload one source screenshot
+- Enter the localized title
+- Choose store and slot `1..6`
+- Preview and production both use the same canvas pipeline
+
+Renderer notes:
+- No Figma REST export is used
+- No plugin bridge is used
+- iOS and Play Store each have their own canvas size and palette defaults
+- Current scope: `single screenshot`, `single locale`, `single title`
 
 ### Key API Endpoints
 
@@ -81,6 +96,7 @@ npm run web:api
 | `POST` | `/api/apps/:id/locales/apply` | Add/remove/update locale details |
 | `GET` | `/api/apps/:id/locales/details` | All synced locale details |
 | `GET` | `/api/apps/:id/locales/details/:store/:locale` | Single locale detail |
+| `POST` | `/api/apps/:id/screenshots/ios/generate` | iOS single screenshot render (Variant_3 code renderer) |
 | `POST` | `/api/apps/:id/generate-translations` | AI translate via NDJSON streaming |
 | `POST` | `/api/apps/:id/copy-cross-store` | Copy data between iOS and Play stores |
 | `GET` | `/api/apps/:id/apple-cfbundle-list` | Download CFBundleList JSON |

@@ -17,5 +17,11 @@ export default defineConfig({
   build: {
     outDir: resolve(currentDir, "../public"),
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: resolve(currentDir, "index.html"),
+        sstest: resolve(currentDir, "sstest.html"),
+      },
+    },
   },
 });
