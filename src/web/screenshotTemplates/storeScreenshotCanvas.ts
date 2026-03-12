@@ -39,6 +39,15 @@ export const IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER = 2;
 export const IOS_HERO_SLOT_2_SCENE_OFFSET_Y = 0;
 export const IOS_HERO_SPLIT_SEAM_GAP_PX = 80;
 
+export const ANDROID_SCREEN_REFERENCE_WIDTH = 1080;
+export const ANDROID_SCREEN_REFERENCE_HEIGHT = 2400;
+const IOS_TITLE_BLOCK_X = 88;
+const IOS_TITLE_BLOCK_Y = 146;
+const PLAY_STORE_TITLE_BLOCK_X = 76;
+const PLAY_STORE_TITLE_BLOCK_Y = 114;
+const IOS_TITLE_LINE_HEIGHT_MULTIPLIER = 0.95;
+const PLAY_STORE_TITLE_LINE_HEIGHT_MULTIPLIER = 0.94;
+
 export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
   slot: ScreenshotTemplateSlot;
@@ -112,6 +121,8 @@ export async function drawStoreScreenshotToContext(
       titleLineGap: input.titleLineGap,
       palette,
       screenshotImage,
+      heroPhonePose: input.heroPhonePose,
+      heroPhoneShape: input.heroPhoneShape,
       width: canvasSize.width,
       height: canvasSize.height,
     });
@@ -228,13 +239,13 @@ export function drawIosSplitHeroBackdrop(
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
-  if (input.slot === 1) {
+  if (input.slot === 1 || input.slot === 2) {
     drawSlot1SbeEffect(ctx, input.slot1SbeSettings);
   }
 
   drawTitleBlock(ctx, {
-    x: 88,
-    y: input.slot === 1 ? 126 : 148,
+    x: IOS_TITLE_BLOCK_X,
+    y: IOS_TITLE_BLOCK_Y,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -316,6 +327,7 @@ function drawIosPoster(
     palette: input.palette,
     screenshotImage: input.screenshotImage,
     heroPhoneShape: input.heroPhoneShape,
+    includeIsland: true,
   });
 }
 
@@ -337,8 +349,8 @@ export function drawIosPosterBackdrop(
   ctx.fillRect(0, 0, width, height);
 
   drawTitleBlock(ctx, {
-    x: 88,
-    y: 146,
+    x: IOS_TITLE_BLOCK_X,
+    y: IOS_TITLE_BLOCK_Y,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -360,26 +372,103 @@ function drawPlayStoreFrame(
     titleLineGap?: number | null;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
+    heroPhonePose?: Partial<IosHeroPhonePose> | null;
+    heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
+    width: number;
+    height: number;
+  }
+): void {
+  if (input.slot === 1 || input.slot === 2) {
+    drawPlayStoreSplitHero(ctx, input as typeof input & { slot: 1 | 2 });
+    return;
+  }
+
+  drawPlayStorePoster(ctx, input as typeof input & { slot: 3 | 4 | 5 | 6 });
+}
+
+function drawPlayStoreSplitHero(
+  ctx: any,
+  input: {
+    slot: 1 | 2;
+    titleLines: string[];
+    titleTypography: ScreenshotTitleTypography;
+    titleLineColors: string[];
+    titleLineGap?: number | null;
+    palette: ScreenshotTemplatePalette;
+    screenshotImage: any;
+    heroPhonePose?: Partial<IosHeroPhonePose> | null;
+    slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
+    width: number;
+    height: number;
+  }
+): void {
+  drawPlayStoreSplitHeroBackdrop(ctx, {
+    slot: input.slot,
+    titleLines: input.titleLines,
+    titleTypography: input.titleTypography,
+    titleLineColors: input.titleLineColors,
+    titleLineGap: input.titleLineGap,
+    palette: input.palette,
+    slot1SbeSettings: input.slot1SbeSettings,
+    width: input.width,
+    height: input.height,
+  });
+
+  const sceneWidth =
+    input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER + IOS_HERO_SPLIT_SEAM_GAP_PX;
+  const sceneOffsetX = input.slot === 1 ? 0 : input.width + IOS_HERO_SPLIT_SEAM_GAP_PX;
+  const sceneOffsetY = input.slot === 2 ? IOS_HERO_SLOT_2_SCENE_OFFSET_Y : 0;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, input.width, input.height);
+  ctx.clip();
+  ctx.translate(-sceneOffsetX, sceneOffsetY);
+
+  drawPlayStoreSplitHeroSharedDecor(ctx, {
+    palette: input.palette,
+    sceneWidth,
+    height: input.height,
+  });
+
+  drawIosHeroDeviceScene(
+    ctx,
+    input.screenshotImage,
+    null,
+    resolveIosHeroPhonePose(input.heroPhonePose)
+  );
+
+  ctx.restore();
+}
+
+export function drawPlayStoreSplitHeroBackdrop(
+  ctx: any,
+  input: {
+    slot: 1 | 2;
+    titleLines: string[];
+    titleTypography: ScreenshotTitleTypography;
+    titleLineColors: string[];
+    titleLineGap?: number | null;
+    palette: ScreenshotTemplatePalette;
+    slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
     height: number;
   }
 ): void {
   const { palette, width, height } = input;
-  const dark = '#0c1712';
-  const ink = '#183328';
-  const titleColor = palette.cream;
-  ctx.fillStyle = dark;
+  const background = ctx.createLinearGradient(0, 0, 0, height);
+  background.addColorStop(0, '#f8f4ee');
+  background.addColorStop(1, '#efe9e2');
+  ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
-  const gradient = ctx.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, rgba(hexToRgb(palette.accent), 0.08));
-  gradient.addColorStop(1, rgba(hexToRgb(ink), 0.28));
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, width, height);
+  if (input.slot === 1 || input.slot === 2) {
+    drawSlot1SbeEffect(ctx, input.slot1SbeSettings);
+  }
 
   drawTitleBlock(ctx, {
-    x: 76,
-    y: 114,
+    x: PLAY_STORE_TITLE_BLOCK_X,
+    y: PLAY_STORE_TITLE_BLOCK_Y,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -387,16 +476,86 @@ function drawPlayStoreFrame(
     lineGap: resolveTitleLineGap(input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
-    color: titleColor,
+    color: palette.bgInk,
+    accentColor: input.slot === 1 ? palette.accent : undefined,
+    accentFirstLine: input.slot === 1,
   });
+}
 
-  drawAndroidPosterPhone(ctx, {
+export function drawPlayStoreSplitHeroSharedDecor(
+  ctx: any,
+  _input: {
+    palette: ScreenshotTemplatePalette;
+    sceneWidth: number;
+    height: number;
+  }
+): void {
+  drawSoftShadow(ctx, 1088, 1620, 380, 0.22);
+}
+
+function drawPlayStorePoster(
+  ctx: any,
+  input: {
+    slot: 3 | 4 | 5 | 6;
+    titleLines: string[];
+    titleTypography: ScreenshotTitleTypography;
+    titleLineColors: string[];
+    titleLineGap?: number | null;
+    palette: ScreenshotTemplatePalette;
+    screenshotImage: any;
+    width: number;
+    height: number;
+  }
+): void {
+  drawPlayStorePosterBackdrop(ctx, input);
+
+  const phoneWidth = 816;
+  const phoneInset = 22;
+  const screenWidth = phoneWidth - phoneInset * 2;
+  const screenHeight = Math.round(
+    screenWidth * (ANDROID_SCREEN_REFERENCE_HEIGHT / ANDROID_SCREEN_REFERENCE_WIDTH)
+  );
+  const phoneHeight = screenHeight + phoneInset * 2;
+
+  drawPosterPhone(ctx, {
     x: 132,
     y: 600,
-    width: 816,
-    height: 1500,
-    palette,
+    width: phoneWidth,
+    height: phoneHeight,
+    palette: input.palette,
     screenshotImage: input.screenshotImage,
+    includeIsland: false,
+  });
+}
+
+export function drawPlayStorePosterBackdrop(
+  ctx: any,
+  input: {
+    slot: 3 | 4 | 5 | 6;
+    titleLines: string[];
+    titleTypography: ScreenshotTitleTypography;
+    titleLineColors: string[];
+    titleLineGap?: number | null;
+    palette: ScreenshotTemplatePalette;
+    width: number;
+    height: number;
+  }
+): void {
+  const { palette, width, height } = input;
+  ctx.fillStyle = palette.accent;
+  ctx.fillRect(0, 0, width, height);
+
+  drawTitleBlock(ctx, {
+    x: PLAY_STORE_TITLE_BLOCK_X,
+    y: PLAY_STORE_TITLE_BLOCK_Y,
+    lines: input.titleLines,
+    fontFamily: input.titleTypography.fontFamily,
+    fontSize: input.titleTypography.fontSize,
+    lineHeight: getTitleLineHeight('play_store', input.slot, input.titleTypography.fontSize),
+    lineGap: resolveTitleLineGap(input.titleLineGap),
+    weight: input.titleTypography.fontWeight,
+    lineColors: input.titleLineColors,
+    color: palette.cream,
   });
 }
 
@@ -445,7 +604,9 @@ function drawIosHeroDeviceScene(
     poseTransform.e,
     poseTransform.f
   );
-  ctx.drawImage(overlayImage, 0, 0, IOS_HERO_DEVICE_SCENE_WIDTH, IOS_HERO_DEVICE_SCENE_HEIGHT);
+  if (overlayImage) {
+    ctx.drawImage(overlayImage, 0, 0, IOS_HERO_DEVICE_SCENE_WIDTH, IOS_HERO_DEVICE_SCENE_HEIGHT);
+  }
   ctx.restore();
 }
 
@@ -459,6 +620,7 @@ function drawPosterPhone(
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
+    includeIsland?: boolean;
   }
 ): void {
   const { x, y, width, height, palette, screenshotImage } = input;
@@ -505,59 +667,31 @@ function drawPosterPhone(
     placeholderSubColor: '#8a8a8d',
   });
 
-  const screenWidthMm = Math.max(1, resolvedShape.widthMm - 4);
-  const screenLengthMm = Math.max(1, resolvedShape.lengthMm - 4);
-  const islandWidth = Math.max(1, Math.min(screenWidth, screenWidth * (resolvedShape.islandWidthMm / screenWidthMm)));
-  const islandLength = Math.max(1, Math.min(screenHeight, screenHeight * (resolvedShape.islandLengthMm / screenLengthMm)));
-  const islandRadius = Math.max(
-    0,
-    Math.min(
-      islandWidth / 2,
-      islandLength / 2,
-      screenWidth * (resolvedShape.islandRadiusMm / screenWidthMm)
-    )
-  );
-  const islandX = screenX + (screenWidth - islandWidth) / 2;
-  const islandY = screenY + islandLength * 0.3;
-  fillRoundedRect(ctx, islandX, islandY, islandWidth, islandLength, islandRadius, '#06080b');
-}
-
-function drawAndroidPosterPhone(
-  ctx: any,
-  input: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    palette: ScreenshotTemplatePalette;
-    screenshotImage: any;
+  if (input.includeIsland) {
+    const screenWidthMm = Math.max(1, resolvedShape.widthMm - 4);
+    const screenLengthMm = Math.max(1, resolvedShape.lengthMm - 4);
+    const islandWidth = Math.max(
+      1,
+      Math.min(screenWidth, screenWidth * (resolvedShape.islandWidthMm / screenWidthMm))
+    );
+    const islandLength = Math.max(
+      1,
+      Math.min(screenHeight, screenHeight * (resolvedShape.islandLengthMm / screenLengthMm))
+    );
+    const islandRadius = Math.max(
+      0,
+      Math.min(
+        islandWidth / 2,
+        islandLength / 2,
+        screenWidth * (resolvedShape.islandRadiusMm / screenWidthMm)
+      )
+    );
+    const islandX = screenX + (screenWidth - islandWidth) / 2;
+    const islandY = screenY + islandLength * 0.3;
+    fillRoundedRect(ctx, islandX, islandY, islandWidth, islandLength, islandRadius, '#06080b');
   }
-): void {
-  const { x, y, width, height, palette, screenshotImage } = input;
-  drawSoftShadow(ctx, x + width / 2, y + height / 2 + 30, width * 0.5, 0.12);
-
-  fillRoundedRect(ctx, x, y, width, height, 94, palette.bgInk);
-  strokeRoundedRect(ctx, x, y, width, height, 94, rgba(hexToRgb(palette.cream), 0.18), 2);
-
-  const screenX = x + 26;
-  const screenY = y + 26;
-  const screenWidth = width - 52;
-  const screenHeight = height - 52;
-  drawDeviceScreen(ctx, {
-    x: screenX,
-    y: screenY,
-    width: screenWidth,
-    height: screenHeight,
-    radius: 72,
-    background: palette.cream,
-    screenshotImage,
-    placeholderColor: '#4b6356',
-    placeholderSubColor: '#6d8778',
-  });
-
-  fillRoundedRect(ctx, x + width / 2 - 58, y + 16, 116, 20, 10, '#0a0a0b');
-  drawSoftCircle(ctx, x + width / 2, y + 26, 6, '#101214');
 }
+
 
 function drawDeviceScreen(
   ctx: any,
@@ -654,15 +788,6 @@ function drawTitleBlock(
       (input.accentFirstLine && index === 0 && input.accentColor ? input.accentColor : input.color);
     ctx.fillText(line, input.x, input.y + index * (input.lineHeight + (input.lineGap ?? 0)));
   }
-}
-
-function drawSoftCircle(ctx: any, x: number, y: number, radius: number, fill: string): void {
-  ctx.save();
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
 }
 
 function drawSoftShadow(
@@ -1002,13 +1127,11 @@ function composeFontStack(fontFamily: string): string {
 
 function getTitleLineHeight(
   store: ScreenshotStore,
-  slot: ScreenshotTemplateSlot,
+  _slot: ScreenshotTemplateSlot,
   fontSize: number
 ): number {
-  if (store === 'play_store') return Math.round(fontSize * 0.94);
-  if (slot === 2) return Math.round(fontSize * 1);
-  if (slot >= 3) return Math.round(fontSize * 0.95);
-  return Math.round(fontSize * 0.93);
+  if (store === 'play_store') return Math.round(fontSize * PLAY_STORE_TITLE_LINE_HEIGHT_MULTIPLIER);
+  return Math.round(fontSize * IOS_TITLE_LINE_HEIGHT_MULTIPLIER);
 }
 
 function resolveTitleLineGap(value: unknown): number {

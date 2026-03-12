@@ -1,3 +1,5 @@
+import type { ScreenshotStore } from './screenshotStores.js';
+
 export type ProceduralDeviceRotation = {
   rotateX: number;
   rotateY: number;
@@ -65,6 +67,13 @@ export const DEFAULT_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
   islandRadiusMm: 2.9,
 };
 
+export const DEFAULT_PLAY_STORE_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
+  ...DEFAULT_PROCEDURAL_DEVICE_SHAPE,
+  widthMm: 72,
+  lengthMm: 152.8,
+  thicknessMm: 8.6,
+};
+
 export const DEFAULT_PROCEDURAL_CAMERA_MODE: ProceduralCameraMode = 'orthographic';
 export const DEFAULT_PROCEDURAL_CAMERA_SETTINGS: ProceduralCameraSettings = {
   perspectiveFov: 34,
@@ -115,6 +124,14 @@ export const DEFAULT_IOS_HERO_PHONE_LOCATION: ProceduralDeviceLocation = {
   z: 0,
 };
 export const DEFAULT_IOS_HERO_PHONE_SHAPE = DEFAULT_PROCEDURAL_DEVICE_SHAPE;
+
+export function getDefaultProceduralDeviceShape(
+  store: ScreenshotStore = 'ios'
+): ProceduralDeviceShape {
+  return store === 'play_store'
+    ? { ...DEFAULT_PLAY_STORE_PROCEDURAL_DEVICE_SHAPE }
+    : { ...DEFAULT_PROCEDURAL_DEVICE_SHAPE };
+}
 
 export function resolveProceduralDeviceRotation(
   value?: Partial<ProceduralDeviceRotation> | null
@@ -226,6 +243,27 @@ export function resolveProceduralDeviceShape(
     }
   ) | null
 ): ProceduralDeviceShape {
+  return resolveProceduralDeviceShapeForStore('ios', value);
+}
+
+export function resolveProceduralDeviceShapeForStore(
+  store: ScreenshotStore,
+  value?: (
+    Partial<ProceduralDeviceShape> & {
+      width?: number | null;
+      height?: number | null;
+      length?: number | null;
+      depth?: number | null;
+      thickness?: number | null;
+      edgeRadius?: number | null;
+      edgeSmoothness?: number | null;
+      islandWidth?: number | null;
+      islandLength?: number | null;
+      islandRadius?: number | null;
+    }
+  ) | null
+): ProceduralDeviceShape {
+  const defaults = getDefaultProceduralDeviceShape(store);
   const hasNewMmShapeFields =
     value != null &&
     typeof value === 'object' &&
@@ -255,64 +293,64 @@ export function resolveProceduralDeviceShape(
   // the correct behavior is to fall back to the shared defaults instead of
   // treating those legacy numbers as millimeters.
   if (!hasNewMmShapeFields && hasLegacyShapeFields) {
-    return { ...DEFAULT_PROCEDURAL_DEVICE_SHAPE };
+    return { ...defaults };
   }
 
   return {
     widthMm: positiveFiniteNumber(
-      Number(value?.widthMm ?? value?.width ?? DEFAULT_PROCEDURAL_DEVICE_SHAPE.widthMm),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.widthMm
+      Number(value?.widthMm ?? value?.width ?? defaults.widthMm),
+      defaults.widthMm
     ),
     lengthMm: positiveFiniteNumber(
       Number(
         value?.lengthMm ??
           value?.length ??
           value?.height ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.lengthMm
+          defaults.lengthMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.lengthMm
+      defaults.lengthMm
     ),
     thicknessMm: nonNegativeFiniteNumber(
       Number(
         value?.thicknessMm ??
           value?.thickness ??
           value?.depth ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.thicknessMm
+          defaults.thicknessMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.thicknessMm
+      defaults.thicknessMm
     ),
     edgeSmoothnessMm: nonNegativeFiniteNumber(
       Number(
         value?.edgeSmoothnessMm ??
           value?.edgeSmoothness ??
           value?.edgeRadius ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.edgeSmoothnessMm
+          defaults.edgeSmoothnessMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.edgeSmoothnessMm
+      defaults.edgeSmoothnessMm
     ),
     islandWidthMm: positiveFiniteNumber(
       Number(
         value?.islandWidthMm ??
           value?.islandWidth ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandWidthMm
+          defaults.islandWidthMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandWidthMm
+      defaults.islandWidthMm
     ),
     islandLengthMm: positiveFiniteNumber(
       Number(
         value?.islandLengthMm ??
           value?.islandLength ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandLengthMm
+          defaults.islandLengthMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandLengthMm
+      defaults.islandLengthMm
     ),
     islandRadiusMm: nonNegativeFiniteNumber(
       Number(
         value?.islandRadiusMm ??
           value?.islandRadius ??
-          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandRadiusMm
+          defaults.islandRadiusMm
       ),
-      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandRadiusMm
+      defaults.islandRadiusMm
     ),
   };
 }

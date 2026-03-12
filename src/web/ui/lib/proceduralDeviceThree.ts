@@ -99,6 +99,7 @@ export function createProceduralDeviceGroup(input?: {
   profile?: Partial<ProceduralDeviceProfile> | null;
   screenshotTexture?: THREE.Texture | null;
   includeScreen?: boolean;
+  includeIsland?: boolean;
 }): THREE.Group {
   const group = new THREE.Group();
   rebuildProceduralDeviceGroup(group, input);
@@ -114,6 +115,7 @@ export function rebuildProceduralDeviceGroup(
     profile?: Partial<ProceduralDeviceProfile> | null;
     screenshotTexture?: THREE.Texture | null;
     includeScreen?: boolean;
+    includeIsland?: boolean;
   }
 ): void {
   clearObject3D(group);
@@ -126,6 +128,7 @@ export function rebuildProceduralDeviceGroup(
     ...(input?.profile ?? {}),
   };
   const includeScreen = input?.includeScreen ?? false;
+  const includeIsland = input?.includeIsland ?? true;
 
   const bodyGeometry = createRoundedRectExtrudedGeometry(shape);
   const bodyMaterial = new THREE.MeshPhysicalMaterial({
@@ -170,28 +173,30 @@ export function rebuildProceduralDeviceGroup(
     screen.position.z = screenFrontZ;
     group.add(screen);
 
-    const islandWidth = Math.max(1, Math.min(shape.islandWidthMm, screenWidth));
-    const islandLength = Math.max(1, Math.min(shape.islandLengthMm, screenLength));
-    const islandRadius = Math.max(
-      0,
-      Math.min(shape.islandRadiusMm, islandWidth / 2, islandLength / 2)
-    );
-    const island = new THREE.Mesh(
-      createRoundedRectPlaneGeometry(islandWidth, islandLength, islandRadius),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(profile.notchColor),
-        toneMapped: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -2,
-      })
-    );
-    island.position.set(
-      0,
-      shape.lengthMm / 2 - insetY - islandLength * 0.8,
-      screenFrontZ + PROCEDURAL_DEVICE_ISLAND_Z_OFFSET_MM
-    );
-    group.add(island);
+    if (includeIsland) {
+      const islandWidth = Math.max(1, Math.min(shape.islandWidthMm, screenWidth));
+      const islandLength = Math.max(1, Math.min(shape.islandLengthMm, screenLength));
+      const islandRadius = Math.max(
+        0,
+        Math.min(shape.islandRadiusMm, islandWidth / 2, islandLength / 2)
+      );
+      const island = new THREE.Mesh(
+        createRoundedRectPlaneGeometry(islandWidth, islandLength, islandRadius),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(profile.notchColor),
+          toneMapped: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -2,
+        })
+      );
+      island.position.set(
+        0,
+        shape.lengthMm / 2 - insetY - islandLength * 0.8,
+        screenFrontZ + PROCEDURAL_DEVICE_ISLAND_Z_OFFSET_MM
+      );
+      group.add(island);
+    }
   }
 
   applyProceduralDeviceTransform(group, rotation, location);
@@ -325,6 +330,7 @@ export async function renderProceduralDeviceSceneToCanvas(input: {
   cameraMode?: ProceduralCameraMode | null;
   cameraSettings?: Partial<ProceduralCameraSettings> | null;
   profile?: Partial<ProceduralDeviceProfile> | null;
+  includeIsland?: boolean;
   targetCanvas?: HTMLCanvasElement;
 }): Promise<HTMLCanvasElement> {
   const canvas = input.targetCanvas ?? document.createElement('canvas');
@@ -378,6 +384,7 @@ export async function renderProceduralDeviceSceneToCanvas(input: {
     profile: input.profile,
     screenshotTexture,
     includeScreen: true,
+    includeIsland: input.includeIsland,
   });
   scene.add(deviceGroup);
 

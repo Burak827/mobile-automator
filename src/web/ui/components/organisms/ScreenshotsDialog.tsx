@@ -9,17 +9,17 @@ import {
 import {
   DEFAULT_PROCEDURAL_CAMERA_MODE,
   DEFAULT_PROCEDURAL_CAMERA_SETTINGS,
-  DEFAULT_PROCEDURAL_DEVICE_SHAPE,
   DEFAULT_IOS_HERO_PHONE_LOCATION,
   DEFAULT_IOS_HERO_PHONE_POSE,
+  getDefaultProceduralDeviceShape,
   proceduralKeyLightPositionFromSettings,
   resolveProceduralCameraMode,
   resolveProceduralCameraSettings,
   resolveIosHeroPhoneLocation,
   resolveIosHeroPhonePose,
+  resolveProceduralDeviceShapeForStore,
   resolveProceduralKeyLightSettings,
   resolveProceduralLightPosition,
-  resolveProceduralDeviceShape,
   type IosHeroPhonePose,
   type IosHeroPhoneShape,
   type ProceduralCameraMode,
@@ -316,7 +316,7 @@ function mergeScreenshotPresetConfig(
 }
 
 function getSlotPaletteTargets(store: ScreenshotStore, slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
-  if (store === 'ios' && (slot === 1 || slot === 2)) {
+  if (slot === 1 || slot === 2) {
     return [1, 2];
   }
   return [slot];
@@ -393,8 +393,9 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
 
     const renderId = ++renderIdRef.current;
 
-    if (store === 'ios' && slot <= 2) {
+    if (slot <= 2) {
       void renderIosProceduralHeroComposite({
+        store,
         slot: slot as 1 | 2,
         title,
         titleTypography,
@@ -503,35 +504,38 @@ export default function ScreenshotsDialog({
   });
   const [heroPhonePoseByStore, setHeroPhonePoseByStore] = useState<Record<ScreenshotStore, IosHeroPhonePose | null>>({
     ios: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
-    play_store: null,
+    play_store: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
   });
   const [heroPhoneShapeByStore, setHeroPhoneShapeByStore] = useState<Record<ScreenshotStore, IosHeroPhoneShape | null>>({
-    ios: resolveProceduralDeviceShape(DEFAULT_PROCEDURAL_DEVICE_SHAPE),
-    play_store: null,
+    ios: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios')),
+    play_store: resolveProceduralDeviceShapeForStore(
+      'play_store',
+      getDefaultProceduralDeviceShape('play_store')
+    ),
   });
   const [heroPhoneLocationByStore, setHeroPhoneLocationByStore] = useState<Record<ScreenshotStore, ProceduralDeviceLocation | null>>({
     ios: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
-    play_store: null,
+    play_store: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
   });
   const [heroKeyLightPositionByStore, setHeroKeyLightPositionByStore] = useState<Record<ScreenshotStore, ProceduralLightPosition | null>>({
     ios: resolveProceduralLightPosition(),
-    play_store: null,
+    play_store: resolveProceduralLightPosition(),
   });
   const [heroKeyLightSettingsByStore, setHeroKeyLightSettingsByStore] = useState<Record<ScreenshotStore, ProceduralKeyLightSettings | null>>({
     ios: resolveProceduralKeyLightSettings(),
-    play_store: null,
+    play_store: resolveProceduralKeyLightSettings(),
   });
   const [slot1SbeSettingsByStore, setSlot1SbeSettingsByStore] = useState<Record<ScreenshotStore, Slot1SbeSettings | null>>({
     ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
-    play_store: null,
+    play_store: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
   });
   const [heroCameraModeByStore, setHeroCameraModeByStore] = useState<Record<ScreenshotStore, ProceduralCameraMode | null>>({
     ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
-    play_store: null,
+    play_store: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
   });
   const [heroCameraSettingsByStore, setHeroCameraSettingsByStore] = useState<Record<ScreenshotStore, ProceduralCameraSettings | null>>({
     ios: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
-    play_store: null,
+    play_store: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
   });
   const [panelState, setPanelState] = useState({
     rotation: false,
@@ -558,7 +562,7 @@ export default function ScreenshotsDialog({
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
       slotTitleTypography: createSlotTitleTypographyMap('ios'),
       heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
-      heroPhoneShape: resolveProceduralDeviceShape(DEFAULT_PROCEDURAL_DEVICE_SHAPE),
+      heroPhoneShape: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios')),
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
       heroKeyLightPosition: resolveProceduralLightPosition(),
       heroKeyLightSettings: resolveProceduralKeyLightSettings(),
@@ -573,14 +577,17 @@ export default function ScreenshotsDialog({
       slotTitleExtraLineColors: createEmptyScreenshotTitleExtraLineColorsMap(),
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
       slotTitleTypography: createSlotTitleTypographyMap('play_store'),
-      heroPhonePose: null,
-      heroPhoneShape: null,
-      heroPhoneLocation: null,
-      heroKeyLightPosition: null,
-      heroKeyLightSettings: null,
-      slot1SbeSettings: null,
-      heroCameraMode: null,
-      heroCameraSettings: null,
+      heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
+      heroPhoneShape: resolveProceduralDeviceShapeForStore(
+        'play_store',
+        getDefaultProceduralDeviceShape('play_store')
+      ),
+      heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
+      heroKeyLightPosition: resolveProceduralLightPosition(),
+      heroKeyLightSettings: resolveProceduralKeyLightSettings(),
+      slot1SbeSettings: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+      heroCameraMode: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
+      heroCameraSettings: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }),
   });
   const browserImageLoader = useMemo(() => createBrowserCanvasImageLoader(), []);
@@ -624,38 +631,41 @@ export default function ScreenshotsDialog({
     };
     const nextHeroPhonePose: Record<ScreenshotStore, IosHeroPhonePose | null> = {
       ios: resolveIosHeroPhonePose(initialIosPreset?.heroPhonePose),
-      play_store: null,
+      play_store: resolveIosHeroPhonePose(initialPlayPreset?.heroPhonePose),
     };
     const nextHeroPhoneShape: Record<ScreenshotStore, IosHeroPhoneShape | null> = {
-      ios: resolveProceduralDeviceShape(initialIosPreset?.heroPhoneShape),
-      play_store: null,
+      ios: resolveProceduralDeviceShapeForStore('ios', initialIosPreset?.heroPhoneShape),
+      play_store: resolveProceduralDeviceShapeForStore('play_store', initialPlayPreset?.heroPhoneShape),
     };
     const nextHeroPhoneLocation: Record<ScreenshotStore, ProceduralDeviceLocation | null> = {
       ios: resolveIosHeroPhoneLocation(initialIosPreset?.heroPhoneLocation),
-      play_store: null,
+      play_store: resolveIosHeroPhoneLocation(initialPlayPreset?.heroPhoneLocation),
     };
     const nextHeroKeyLightPosition: Record<ScreenshotStore, ProceduralLightPosition | null> = {
       ios: resolveProceduralLightPosition(initialIosPreset?.heroKeyLightPosition),
-      play_store: null,
+      play_store: resolveProceduralLightPosition(initialPlayPreset?.heroKeyLightPosition),
     };
     const nextHeroKeyLightSettings: Record<ScreenshotStore, ProceduralKeyLightSettings | null> = {
       ios: resolveProceduralKeyLightSettings(
         initialIosPreset?.heroKeyLightSettings,
         initialIosPreset?.heroKeyLightPosition
       ),
-      play_store: null,
+      play_store: resolveProceduralKeyLightSettings(
+        initialPlayPreset?.heroKeyLightSettings,
+        initialPlayPreset?.heroKeyLightPosition
+      ),
     };
     const nextSlot1SbeSettings: Record<ScreenshotStore, Slot1SbeSettings | null> = {
       ios: resolveSlot1SbeSettings(initialIosPreset?.slot1SbeSettings),
-      play_store: null,
+      play_store: resolveSlot1SbeSettings(initialPlayPreset?.slot1SbeSettings),
     };
     const nextHeroCameraMode: Record<ScreenshotStore, ProceduralCameraMode | null> = {
       ios: resolveProceduralCameraMode(initialIosPreset?.heroCameraMode),
-      play_store: null,
+      play_store: resolveProceduralCameraMode(initialPlayPreset?.heroCameraMode),
     };
     const nextHeroCameraSettings: Record<ScreenshotStore, ProceduralCameraSettings | null> = {
       ios: resolveProceduralCameraSettings(initialIosPreset?.heroCameraSettings),
-      play_store: null,
+      play_store: resolveProceduralCameraSettings(initialPlayPreset?.heroCameraSettings),
     };
     setStore(defaultStore);
     setLocale(nextLocale);
@@ -793,45 +803,40 @@ export default function ScreenshotsDialog({
   );
   const resolvedTitleLineGap = titleLineGapByStore[store]?.[slot] ?? 0;
   const resolvedHeroPhonePose = useMemo(
-    () => (store === 'ios' ? resolveIosHeroPhonePose(heroPhonePoseByStore.ios) : null),
-    [heroPhonePoseByStore.ios, store]
+    () => resolveIosHeroPhonePose(heroPhonePoseByStore[store]),
+    [heroPhonePoseByStore, store]
   );
   const resolvedHeroPhoneShape = useMemo(
-    () => (store === 'ios' ? resolveProceduralDeviceShape(heroPhoneShapeByStore.ios) : null),
-    [heroPhoneShapeByStore.ios, store]
+    () => resolveProceduralDeviceShapeForStore(store, heroPhoneShapeByStore[store]),
+    [heroPhoneShapeByStore, store]
   );
   const resolvedHeroPhoneLocation = useMemo(
-    () => (store === 'ios' ? resolveIosHeroPhoneLocation(heroPhoneLocationByStore.ios) : null),
-    [heroPhoneLocationByStore.ios, store]
+    () => resolveIosHeroPhoneLocation(heroPhoneLocationByStore[store]),
+    [heroPhoneLocationByStore, store]
   );
   const resolvedHeroKeyLightPosition = useMemo(
-    () => (store === 'ios' ? resolveProceduralLightPosition(heroKeyLightPositionByStore.ios) : null),
-    [heroKeyLightPositionByStore.ios, store]
+    () => resolveProceduralLightPosition(heroKeyLightPositionByStore[store]),
+    [heroKeyLightPositionByStore, store]
   );
   const resolvedHeroKeyLightSettings = useMemo(
     () =>
-      (store === 'ios'
-        ? resolveProceduralKeyLightSettings(
-            heroKeyLightSettingsByStore.ios,
-            heroKeyLightPositionByStore.ios
-          )
-        : null),
-    [heroKeyLightPositionByStore.ios, heroKeyLightSettingsByStore.ios, store]
+      resolveProceduralKeyLightSettings(
+        heroKeyLightSettingsByStore[store],
+        heroKeyLightPositionByStore[store]
+      ),
+    [heroKeyLightPositionByStore, heroKeyLightSettingsByStore, store]
   );
   const resolvedSlot1SbeSettings = useMemo(
-    () => (store === 'ios' ? resolveSlot1SbeSettings(slot1SbeSettingsByStore.ios) : null),
-    [slot1SbeSettingsByStore.ios, store]
+    () => resolveSlot1SbeSettings(slot1SbeSettingsByStore[store]),
+    [slot1SbeSettingsByStore, store]
   );
   const resolvedHeroCameraMode = useMemo(
-    () => (store === 'ios' ? resolveProceduralCameraMode(heroCameraModeByStore.ios) : null),
-    [heroCameraModeByStore.ios, store]
+    () => resolveProceduralCameraMode(heroCameraModeByStore[store]),
+    [heroCameraModeByStore, store]
   );
   const resolvedHeroCameraSettings = useMemo(
-    () =>
-      store === 'ios'
-        ? resolveProceduralCameraSettings(heroCameraSettingsByStore.ios)
-        : null,
-    [heroCameraSettingsByStore.ios, store]
+    () => resolveProceduralCameraSettings(heroCameraSettingsByStore[store]),
+    [heroCameraSettingsByStore, store]
   );
   const persistedTitleExtraLineColorsForStore = useMemo(
     () => ({
@@ -866,29 +871,20 @@ export default function ScreenshotsDialog({
     const slotTitleLineGaps = titleLineGapByStore[targetStore];
     const slotTitleTypography = titleTypographyByStore[targetStore];
     const palette = resolveScreenshotTemplatePalette(targetStore, slotPalettes[1]);
-    const heroPhonePose =
-      targetStore === 'ios' ? resolveIosHeroPhonePose(heroPhonePoseByStore.ios) : null;
-    const heroPhoneShape =
-      targetStore === 'ios' ? resolveProceduralDeviceShape(heroPhoneShapeByStore.ios) : null;
-    const heroPhoneLocation =
-      targetStore === 'ios' ? resolveIosHeroPhoneLocation(heroPhoneLocationByStore.ios) : null;
-    const heroKeyLightPosition =
-      targetStore === 'ios' ? resolveProceduralLightPosition(heroKeyLightPositionByStore.ios) : null;
-    const heroKeyLightSettings =
-      targetStore === 'ios'
-        ? resolveProceduralKeyLightSettings(
-            heroKeyLightSettingsByStore.ios,
-            heroKeyLightPositionByStore.ios
-          )
-        : null;
-    const slot1SbeSettings =
-      targetStore === 'ios' ? resolveSlot1SbeSettings(slot1SbeSettingsByStore.ios) : null;
-    const heroCameraMode =
-      targetStore === 'ios' ? resolveProceduralCameraMode(heroCameraModeByStore.ios) : null;
-    const heroCameraSettings =
-      targetStore === 'ios'
-        ? resolveProceduralCameraSettings(heroCameraSettingsByStore.ios)
-        : null;
+    const heroPhonePose = resolveIosHeroPhonePose(heroPhonePoseByStore[targetStore]);
+    const resolvedHeroPhoneShapeForStore = resolveProceduralDeviceShapeForStore(
+      targetStore,
+      heroPhoneShapeByStore[targetStore]
+    );
+    const heroPhoneLocation = resolveIosHeroPhoneLocation(heroPhoneLocationByStore[targetStore]);
+    const heroKeyLightPosition = resolveProceduralLightPosition(heroKeyLightPositionByStore[targetStore]);
+    const heroKeyLightSettings = resolveProceduralKeyLightSettings(
+      heroKeyLightSettingsByStore[targetStore],
+      heroKeyLightPositionByStore[targetStore]
+    );
+    const slot1SbeSettings = resolveSlot1SbeSettings(slot1SbeSettingsByStore[targetStore]);
+    const heroCameraMode = resolveProceduralCameraMode(heroCameraModeByStore[targetStore]);
+    const heroCameraSettings = resolveProceduralCameraSettings(heroCameraSettingsByStore[targetStore]);
     const preset = {
       palette,
       slotPalettes,
@@ -897,7 +893,7 @@ export default function ScreenshotsDialog({
       slotTitleLineGaps,
       slotTitleTypography,
       heroPhonePose,
-      heroPhoneShape,
+      heroPhoneShape: resolvedHeroPhoneShapeForStore,
       heroPhoneLocation,
       heroKeyLightPosition,
       heroKeyLightSettings,
@@ -909,11 +905,11 @@ export default function ScreenshotsDialog({
       preset,
       key: JSON.stringify(preset),
     };
-  }, [heroCameraModeByStore.ios, heroCameraSettingsByStore.ios, heroKeyLightPositionByStore.ios, heroKeyLightSettingsByStore.ios, heroPhoneLocationByStore.ios, heroPhonePoseByStore.ios, heroPhoneShapeByStore.ios, persistedTitleExtraLineColorsForStore, slot1SbeSettingsByStore.ios, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, slot1SbeSettingsByStore, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
   const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
-  const isIosHeroSlot = store === 'ios' && slot <= 2;
+  const isHeroSlot = slot <= 2;
   const canStart = Boolean(file) && locale.trim().length > 0 && !isLocked;
   const canSaveSettings = Boolean(appId) && !isLocked && !isPersistingPreset;
 
@@ -1050,51 +1046,50 @@ export default function ScreenshotsDialog({
       },
     }));
 
-    if (store !== 'ios' || slot > 2) return;
+    if (slot > 2) return;
 
     setHeroPhonePoseByStore((prev) => ({
       ...prev,
-      ios: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
+      [store]: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
     }));
     setHeroPhoneShapeByStore((prev) => ({
       ...prev,
-      ios: resolveProceduralDeviceShape(DEFAULT_PROCEDURAL_DEVICE_SHAPE),
+      [store]: resolveProceduralDeviceShapeForStore(store, getDefaultProceduralDeviceShape(store)),
     }));
     setHeroPhoneLocationByStore((prev) => ({
       ...prev,
-      ios: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
+      [store]: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
     }));
     setHeroKeyLightPositionByStore((prev) => ({
       ...prev,
-      ios: resolveProceduralLightPosition(),
+      [store]: resolveProceduralLightPosition(),
     }));
     setHeroKeyLightSettingsByStore((prev) => ({
       ...prev,
-      ios: resolveProceduralKeyLightSettings(),
+      [store]: resolveProceduralKeyLightSettings(),
     }));
-    if (slot === 1) {
+    if (slot === 1 || slot === 2) {
       setSlot1SbeSettingsByStore((prev) => ({
         ...prev,
-        ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+        [store]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
       }));
     }
     setHeroCameraModeByStore((prev) => ({
       ...prev,
-      ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
+      [store]: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
     }));
     setHeroCameraSettingsByStore((prev) => ({
       ...prev,
-      ios: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
+      [store]: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }));
   }, [slot, store]);
 
   const handleHeroPhonePoseChange = useCallback(
     (key: keyof IosHeroPhonePose, value: number) => {
-      if (store !== 'ios') return;
     setHeroPhonePoseByStore((prev) => ({
       ...prev,
-      ios: resolveIosHeroPhonePose({
-          ...(prev.ios ?? DEFAULT_IOS_HERO_PHONE_POSE),
+      [store]: resolveIosHeroPhonePose({
+          ...(prev[store] ?? DEFAULT_IOS_HERO_PHONE_POSE),
           [key]: value,
         }),
     }));
@@ -1104,11 +1099,10 @@ export default function ScreenshotsDialog({
 
   const handleHeroPhoneShapeChange = useCallback(
     (key: keyof IosHeroPhoneShape, value: number) => {
-      if (store !== 'ios') return;
       setHeroPhoneShapeByStore((prev) => ({
         ...prev,
-        ios: resolveProceduralDeviceShape({
-          ...(prev.ios ?? DEFAULT_PROCEDURAL_DEVICE_SHAPE),
+        [store]: resolveProceduralDeviceShapeForStore(store, {
+          ...(prev[store] ?? getDefaultProceduralDeviceShape(store)),
           [key]: value,
         }),
       }));
@@ -1118,11 +1112,10 @@ export default function ScreenshotsDialog({
 
   const handleHeroPhoneLocationChange = useCallback(
     (key: keyof ProceduralDeviceLocation, value: number) => {
-      if (store !== 'ios') return;
     setHeroPhoneLocationByStore((prev) => ({
       ...prev,
-      ios: resolveIosHeroPhoneLocation({
-          ...(prev.ios ?? DEFAULT_IOS_HERO_PHONE_LOCATION),
+      [store]: resolveIosHeroPhoneLocation({
+          ...(prev[store] ?? DEFAULT_IOS_HERO_PHONE_LOCATION),
           [key]: value,
         }),
     }));
@@ -1135,19 +1128,18 @@ export default function ScreenshotsDialog({
       key: keyof ProceduralKeyLightSettings,
       value: number | string
     ) => {
-      if (store !== 'ios') return;
       setHeroKeyLightSettingsByStore((prev) => {
         const nextSettings = resolveProceduralKeyLightSettings({
-          ...(prev.ios ?? resolveProceduralKeyLightSettings()),
+          ...(prev[store] ?? resolveProceduralKeyLightSettings()),
           [key]: value,
         });
         setHeroKeyLightPositionByStore((prevPositions) => ({
           ...prevPositions,
-          ios: proceduralKeyLightPositionFromSettings(nextSettings),
+          [store]: proceduralKeyLightPositionFromSettings(nextSettings),
         }));
         return {
           ...prev,
-          ios: nextSettings,
+          [store]: nextSettings,
         };
       });
     },
@@ -1156,11 +1148,10 @@ export default function ScreenshotsDialog({
 
   const handleHeroCameraSettingsChange = useCallback(
     (key: keyof ProceduralCameraSettings, value: number) => {
-      if (store !== 'ios') return;
       setHeroCameraSettingsByStore((prev) => ({
         ...prev,
-        ios: resolveProceduralCameraSettings({
-          ...(prev.ios ?? DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
+        [store]: resolveProceduralCameraSettings({
+          ...(prev[store] ?? DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
           [key]: value,
         }),
       }));
@@ -1170,11 +1161,11 @@ export default function ScreenshotsDialog({
 
   const handleSlot1SbeSettingsChange = useCallback(
     (key: keyof Slot1SbeSettings, value: number | string) => {
-      if (store !== 'ios' || slot !== 1) return;
+      if (slot > 2) return;
       setSlot1SbeSettingsByStore((prev) => ({
         ...prev,
-        ios: resolveSlot1SbeSettings({
-          ...(prev.ios ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+        [store]: resolveSlot1SbeSettings({
+          ...(prev[store] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
           [key]: value,
         }),
       }));
@@ -1220,8 +1211,9 @@ export default function ScreenshotsDialog({
       throw new Error('Screenshot canvas context alınamadı.');
     }
 
-    if (store === 'ios' && targetSlot <= 2) {
+    if (targetSlot <= 2) {
       return renderIosProceduralHeroComposite({
+        store,
         slot: targetSlot as 1 | 2,
         title: slotTitle,
         titleTypography: slotTitleTypography,
@@ -1235,7 +1227,7 @@ export default function ScreenshotsDialog({
         heroPhoneLocation: resolvedHeroPhoneLocation,
         heroKeyLightPosition: resolvedHeroKeyLightPosition,
         heroKeyLightSettings: resolvedHeroKeyLightSettings,
-        slot1SbeSettings: targetSlot === 1 ? resolvedSlot1SbeSettings : null,
+        slot1SbeSettings: targetSlot <= 2 ? resolvedSlot1SbeSettings : null,
         heroCameraMode: resolvedHeroCameraMode,
         heroCameraSettings: resolvedHeroCameraSettings,
         width: previewCanvasSize.width,
@@ -1427,17 +1419,17 @@ export default function ScreenshotsDialog({
                   titleLineGap={titleLineGapByStore[store]?.[previewSlot] ?? 0}
                   palette={slotPalettesByStore[store][previewSlot]}
                   heroPhonePose={
-                    store === 'ios' && previewSlot <= 2
+                    previewSlot <= 2
                       ? resolvedHeroPhonePose
                       : null
                   }
                   heroPhoneShape={resolvedHeroPhoneShape}
-                  heroPhoneLocation={store === 'ios' && previewSlot <= 2 ? resolvedHeroPhoneLocation : null}
-                  heroKeyLightPosition={store === 'ios' && previewSlot <= 2 ? resolvedHeroKeyLightPosition : null}
-                  heroKeyLightSettings={store === 'ios' && previewSlot <= 2 ? resolvedHeroKeyLightSettings : null}
-                  slot1SbeSettings={store === 'ios' && previewSlot === 1 ? resolvedSlot1SbeSettings : null}
-                  heroCameraMode={store === 'ios' && previewSlot <= 2 ? resolvedHeroCameraMode : null}
-                  heroCameraSettings={store === 'ios' && previewSlot <= 2 ? resolvedHeroCameraSettings : null}
+                  heroPhoneLocation={previewSlot <= 2 ? resolvedHeroPhoneLocation : null}
+                  heroKeyLightPosition={previewSlot <= 2 ? resolvedHeroKeyLightPosition : null}
+                  heroKeyLightSettings={previewSlot <= 2 ? resolvedHeroKeyLightSettings : null}
+                  slot1SbeSettings={previewSlot <= 2 ? resolvedSlot1SbeSettings : null}
+                  heroCameraMode={previewSlot <= 2 ? resolvedHeroCameraMode : null}
+                  heroCameraSettings={previewSlot <= 2 ? resolvedHeroCameraSettings : null}
                   screenshotUrl={filePreviewUrl}
                   imageLoader={browserImageLoader}
                   fontLoadVersion={fontLoadVersion}
@@ -1634,7 +1626,7 @@ export default function ScreenshotsDialog({
               ) : null}
             </section>
 
-            {store === 'ios' && slot === 1 ? (
+            {slot <= 2 ? (
               <section className="screenshots-palette-panel">
                 <button
                   type="button"
@@ -1699,7 +1691,7 @@ export default function ScreenshotsDialog({
               </section>
             ) : null}
 
-            {isIosHeroSlot ? (
+            {isHeroSlot ? (
               <section className="screenshots-palette-panel">
                 <div className="screenshots-accordion-head static">
                   <div>
@@ -1712,7 +1704,7 @@ export default function ScreenshotsDialog({
                     variant={resolvedHeroCameraMode === 'perspective' ? 'primary' : 'ghost'}
                     disabled={isLocked}
                     onClick={() =>
-                      setHeroCameraModeByStore((prev) => ({ ...prev, ios: 'perspective' }))
+                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'perspective' }))
                     }
                   >
                     Perspective
@@ -1722,7 +1714,7 @@ export default function ScreenshotsDialog({
                     variant={resolvedHeroCameraMode === 'orthographic' ? 'primary' : 'ghost'}
                     disabled={isLocked}
                     onClick={() =>
-                      setHeroCameraModeByStore((prev) => ({ ...prev, ios: 'orthographic' }))
+                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'orthographic' }))
                     }
                   >
                     Orthographic
@@ -1779,7 +1771,7 @@ export default function ScreenshotsDialog({
               </section>
             ) : null}
 
-            {isIosHeroSlot ? (
+            {isHeroSlot ? (
               <section className="screenshots-palette-panel">
                 <button
                   type="button"
@@ -1840,7 +1832,7 @@ export default function ScreenshotsDialog({
               </section>
             ) : null}
 
-            {isIosHeroSlot ? (
+            {isHeroSlot ? (
               <section className="screenshots-palette-panel">
                 <button
                   type="button"
@@ -1890,7 +1882,7 @@ export default function ScreenshotsDialog({
               </section>
             ) : null}
 
-            {isIosHeroSlot ? (
+            {isHeroSlot ? (
               <section className="screenshots-palette-panel">
                 <button
                   type="button"
@@ -1934,7 +1926,7 @@ export default function ScreenshotsDialog({
               </section>
             ) : null}
 
-            {isIosHeroSlot ? (
+            {isHeroSlot ? (
               <section className="screenshots-palette-panel">
                 <button
                   type="button"
@@ -1955,9 +1947,6 @@ export default function ScreenshotsDialog({
                       ['lengthMm', 'Length', 0.1],
                       ['thicknessMm', 'Thickness', 0.01],
                       ['edgeSmoothnessMm', 'Edge Smoothness', 1],
-                      ['islandWidthMm', 'Island Width', 0.1],
-                      ['islandLengthMm', 'Island Length', 0.1],
-                      ['islandRadiusMm', 'Island Radius', 0.1],
                     ] as const).map(([key, label, step]) => (
                       <label key={key} className="screenshots-shape-item">
                         <div className="screenshots-slider-copy">
@@ -2038,7 +2027,7 @@ export default function ScreenshotsDialog({
                       title: slotTitle.trim(),
                       renderedImageBase64: dataUrl.split(',')[1] ?? null,
                       rendererMode:
-                        store === 'ios' && targetSlot <= 2
+                        targetSlot <= 2
                           ? 'procedural-three'
                           : 'canvas-2d',
                       palette: slotPalette,

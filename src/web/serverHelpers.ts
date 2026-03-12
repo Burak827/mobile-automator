@@ -14,7 +14,7 @@ import {
   resolveProceduralLightPosition,
   resolveProceduralCameraMode,
   resolveProceduralDeviceLocation,
-  resolveIosHeroPhoneShape,
+  resolveProceduralDeviceShapeForStore,
   type IosHeroPhoneShape,
   resolveIosHeroPhonePose,
   type IosHeroPhonePose,
@@ -393,13 +393,12 @@ export function parseScreenshotHeroPhoneShapeInput(
   store: ScreenshotStore,
   value: unknown
 ): IosHeroPhoneShape | null {
-  if (store !== "ios") return null;
   if (!value || typeof value !== "object") {
-    return resolveIosHeroPhoneShape();
+    return resolveProceduralDeviceShapeForStore(store, undefined);
   }
 
   const raw = value as Record<string, unknown>;
-  return resolveIosHeroPhoneShape({
+  return resolveProceduralDeviceShapeForStore(store, {
     widthMm: toOptionalNumber(raw.widthMm),
     lengthMm: toOptionalNumber(raw.lengthMm),
     thicknessMm: toOptionalNumber(raw.thicknessMm),
@@ -482,7 +481,7 @@ export function parseScreenshotSlot1SbeSettingsInput(
   store: ScreenshotStore,
   value: unknown
 ): Slot1SbeSettings | null {
-  if (store !== "ios") return null;
+  void store;
   if (!value || typeof value !== "object") {
     return resolveSlot1SbeSettings();
   }

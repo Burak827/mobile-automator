@@ -52,14 +52,7 @@ const DEFAULT_IOS_PALETTE: ScreenshotTemplatePalette = {
   phoneColor: '#000000',
 };
 
-const DEFAULT_PLAY_STORE_PALETTE: ScreenshotTemplatePalette = {
-  accent: '#33d17a',
-  bgDark: '#0c1712',
-  bgInk: '#183328',
-  cream: '#eef8f1',
-  muted: '#b9d6c3',
-  phoneColor: '#000000',
-};
+const DEFAULT_PLAY_STORE_PALETTE: ScreenshotTemplatePalette = { ...DEFAULT_IOS_PALETTE };
 
 export function getScreenshotTemplateCanvasSize(store: ScreenshotStore): {
   width: number;

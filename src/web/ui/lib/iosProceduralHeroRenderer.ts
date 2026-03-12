@@ -19,6 +19,9 @@ import {
 } from '../../screenshotTemplates/proceduralDeviceConfig';
 import {
   drawIosPosterBackdrop,
+  drawPlayStorePosterBackdrop,
+  drawPlayStoreSplitHeroBackdrop,
+  drawPlayStoreSplitHeroSharedDecor,
   IOS_HERO_SPLIT_SEAM_GAP_PX,
   IOS_HERO_SLOT_2_SCENE_OFFSET_Y,
   IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER,
@@ -27,6 +30,7 @@ import {
   drawIosSplitHeroSharedDecor,
   type ScreenshotCanvasImageLoader,
 } from '../../screenshotTemplates/storeScreenshotCanvas';
+import type { ScreenshotStore } from '../../screenshotTemplates/screenshotStores';
 import {
   resolveSlot1SbeSettings,
   type Slot1SbeSettings,
@@ -54,6 +58,7 @@ import {
 } from './proceduralDeviceThree';
 
 type RenderInput = {
+  store: ScreenshotStore;
   slot: 1 | 2;
   title: string;
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
@@ -128,25 +133,42 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
   }
 
   const titleLines = buildTitleLines(input.slot, input.title);
-  const titleTypography = resolveScreenshotTitleTypography('ios', input.slot, input.titleTypography);
+  const titleTypography = resolveScreenshotTitleTypography(input.store, input.slot, input.titleTypography);
   const titleLineColors = resolveScreenshotTitleLineColors(
-    'ios',
+    input.store,
     input.slot,
     input.palette,
     titleLines.length,
     input.titleExtraLineColors
   );
-  drawIosSplitHeroBackdrop(finalCtx, {
-    slot: input.slot,
-    titleLines,
-    titleTypography,
-    titleLineColors,
-    titleLineGap: input.titleLineGap,
-    palette: input.palette,
-    slot1SbeSettings: input.slot === 1 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
-    width: input.width,
-    height: input.height,
-  });
+
+  if (input.store === 'play_store') {
+    drawPlayStoreSplitHeroBackdrop(finalCtx, {
+      slot: input.slot,
+      titleLines,
+      titleTypography,
+      titleLineColors,
+      titleLineGap: input.titleLineGap,
+      palette: input.palette,
+      slot1SbeSettings:
+        input.slot === 1 || input.slot === 2 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
+      width: input.width,
+      height: input.height,
+    });
+  } else {
+    drawIosSplitHeroBackdrop(finalCtx, {
+      slot: input.slot,
+      titleLines,
+      titleTypography,
+      titleLineColors,
+      titleLineGap: input.titleLineGap,
+      palette: input.palette,
+      slot1SbeSettings:
+        input.slot === 1 || input.slot === 2 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
+      width: input.width,
+      height: input.height,
+    });
+  }
 
   const sceneWidth =
     input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER + IOS_HERO_SPLIT_SEAM_GAP_PX;
@@ -159,7 +181,10 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
   finalCtx.clip();
   finalCtx.translate(-sceneOffsetX, sceneOffsetY);
 
-  drawIosSplitHeroSharedDecor(finalCtx, {
+  const drawSharedDecor = input.store === 'play_store'
+    ? drawPlayStoreSplitHeroSharedDecor
+    : drawIosSplitHeroSharedDecor;
+  drawSharedDecor(finalCtx, {
     palette: input.palette,
     sceneWidth,
     height: input.height,
@@ -169,6 +194,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
   const deviceProfile = getDeviceProfile(input.palette);
   const sceneCanvas = input.previewRuntimeKey
     ? await renderHeroSceneWithRuntime(input.previewRuntimeKey, {
+        store: input.store,
         sceneWidth,
         height: input.height,
         screenshotUrl: input.screenshotUrl,
@@ -183,6 +209,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
         deviceProfile,
       })
     : await renderHeroSceneOneShot({
+        store: input.store,
         sceneWidth,
         height: input.height,
         screenshotUrl: input.screenshotUrl,
@@ -203,6 +230,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
 }
 
 export async function renderIosProceduralPosterComposite(input: {
+  store: ScreenshotStore;
   slot: 3 | 4 | 5 | 6;
   title: string;
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
@@ -225,22 +253,29 @@ export async function renderIosProceduralPosterComposite(input: {
   }
 
   const titleLines = buildTitleLines(input.slot, input.title);
-  drawIosPosterBackdrop(finalCtx, {
+  const posterTitleTypography = resolveScreenshotTitleTypography(input.store, input.slot, input.titleTypography);
+  const posterTitleLineColors = resolveScreenshotTitleLineColors(
+    input.store,
+    input.slot,
+    input.palette,
+    titleLines.length,
+    input.titleExtraLineColors
+  );
+  const backdropInput = {
     slot: input.slot,
     titleLines,
-    titleTypography: resolveScreenshotTitleTypography('ios', input.slot, input.titleTypography),
-    titleLineColors: resolveScreenshotTitleLineColors(
-      'ios',
-      input.slot,
-      input.palette,
-      titleLines.length,
-      input.titleExtraLineColors
-    ),
+    titleTypography: posterTitleTypography,
+    titleLineColors: posterTitleLineColors,
     titleLineGap: input.titleLineGap,
     palette: input.palette,
     width: input.width,
     height: input.height,
-  });
+  };
+  if (input.store === 'play_store') {
+    drawPlayStorePosterBackdrop(finalCtx, backdropInput);
+  } else {
+    drawIosPosterBackdrop(finalCtx, backdropInput);
+  }
 
   const deviceCanvas = await renderProceduralDeviceSceneToCanvas({
     width: POSTER_DEVICE_FRAME.width,
@@ -252,6 +287,7 @@ export async function renderIosProceduralPosterComposite(input: {
     location: POSTER_DEVICE_LOCATION,
     cameraMode: 'orthographic',
     profile: getDeviceProfile(input.palette),
+    includeIsland: input.store === 'ios',
   });
 
   finalCtx.drawImage(
@@ -277,6 +313,7 @@ function getResolvedDeviceLocation(
 }
 
 async function renderHeroSceneOneShot(input: {
+  store: ScreenshotStore;
   sceneWidth: number;
   height: number;
   screenshotUrl: string;
@@ -341,6 +378,7 @@ async function renderHeroSceneOneShot(input: {
     profile: input.deviceProfile,
     screenshotTexture,
     includeScreen: true,
+    includeIsland: input.store === 'ios',
   });
   scene.add(deviceGroup);
 
@@ -361,6 +399,7 @@ async function renderHeroSceneOneShot(input: {
 async function renderHeroSceneWithRuntime(
   runtimeKey: object,
   input: {
+  store: ScreenshotStore;
     sceneWidth: number;
     height: number;
     screenshotUrl: string;
@@ -418,6 +457,7 @@ async function renderHeroSceneWithRuntime(
       profile: input.deviceProfile,
       screenshotTexture,
       includeScreen: true,
+      includeIsland: input.store === 'ios',
     });
     runtime.shapeKey = nextShapeKey;
     runtime.screenshotUrl = input.screenshotUrl;
