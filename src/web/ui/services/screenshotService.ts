@@ -55,7 +55,7 @@ export async function saveScreenshotPreset(
       heroPhoneLocation: preset.heroPhoneLocation,
       heroKeyLightPosition: preset.heroKeyLightPosition,
       heroKeyLightSettings: preset.heroKeyLightSettings,
-      slot1SbeSettings: preset.slot1SbeSettings,
+      slotSbeSettings: preset.slotSbeSettings,
       heroCameraMode: preset.heroCameraMode,
       heroCameraSettings: preset.heroCameraSettings,
     }),

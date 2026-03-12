@@ -24,13 +24,8 @@ export function getDefaultScreenshotTitlePrimaryColor(
   slot: ScreenshotTemplateSlot,
   palette: ScreenshotTemplatePalette
 ): string {
-  if (store === 'play_store') {
-    if (slot === 1) return palette.accent;
-    if (slot === 2) return palette.bgInk;
-    return palette.cream;
-  }
-  if (slot === 1) return palette.accent;
-  if (slot === 2) return palette.bgInk;
+  void store;
+  if (slot === 1 || slot === 2) return palette.bgInk;
   return palette.cream;
 }
 

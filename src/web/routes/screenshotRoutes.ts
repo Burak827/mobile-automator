@@ -23,6 +23,7 @@ import {
   parseScreenshotHeroPhoneShapeInput,
   parseScreenshotPaletteInput,
   parseScreenshotSlotPalettesInput,
+  parseScreenshotSlotSbeSettingsInput,
   parseScreenshotSlot1SbeSettingsInput,
   parseScreenshotSlotTitleExtraLineColorsInput,
   parseScreenshotSlotTitleLineGapsInput,
@@ -76,7 +77,11 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         body.heroKeyLightSettings,
         body.heroKeyLightPosition
       );
-      const slot1SbeSettings = parseScreenshotSlot1SbeSettingsInput(store, body.slot1SbeSettings);
+      const slotSbeSettings = parseScreenshotSlotSbeSettingsInput(
+        store,
+        body.slotSbeSettings,
+        body.slot1SbeSettings
+      );
       const heroCameraMode = parseScreenshotHeroCameraModeInput(store, body.heroCameraMode);
       const heroCameraSettings = parseScreenshotHeroCameraSettingsInput(
         store,
@@ -94,7 +99,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         heroPhoneLocation,
         heroKeyLightPosition,
         heroKeyLightSettings,
-        slot1SbeSettings,
+        slotSbeSettings,
         heroCameraMode,
         heroCameraSettings,
       });
@@ -156,7 +161,11 @@ async function handleScreenshotGenerateRequest(
     body.heroKeyLightSettings,
     body.heroKeyLightPosition
   );
-  const slot1SbeSettings = parseScreenshotSlot1SbeSettingsInput(store, body.slot1SbeSettings);
+  const slotSbeSettings = parseScreenshotSlotSbeSettingsInput(
+    store,
+    body.slotSbeSettings,
+    body.slot1SbeSettings
+  );
   const heroCameraMode = parseScreenshotHeroCameraModeInput(store, body.heroCameraMode);
   const heroCameraSettings = parseScreenshotHeroCameraSettingsInput(
     store,
@@ -221,7 +230,7 @@ async function handleScreenshotGenerateRequest(
     heroPhoneLocation,
     heroKeyLightPosition,
     heroKeyLightSettings,
-    slot1SbeSettings,
+    slotSbeSettings,
     heroCameraMode,
     heroCameraSettings,
   });
@@ -238,7 +247,7 @@ async function handleScreenshotGenerateRequest(
     heroPhoneLocation,
     heroKeyLightPosition,
     heroKeyLightSettings,
-    slot1SbeSettings,
+    slotSbeSettings,
     heroCameraMode,
     heroCameraSettings,
     stagedInputPath: toProjectRelativePath(stagedInputPath),

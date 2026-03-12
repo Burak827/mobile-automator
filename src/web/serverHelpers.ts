@@ -502,6 +502,20 @@ export function parseScreenshotSlot1SbeSettingsInput(
   });
 }
 
+export function parseScreenshotSlotSbeSettingsInput(
+  store: ScreenshotStore,
+  value: unknown,
+  legacyValue?: unknown
+): Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>> {
+  void store;
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const legacy = parseScreenshotSlot1SbeSettingsInput(store, legacyValue);
+  return {
+    1: parseScreenshotSlot1SbeSettingsInput(store, raw['1']) ?? legacy ?? resolveSlot1SbeSettings(),
+    2: parseScreenshotSlot1SbeSettingsInput(store, raw['2']) ?? legacy ?? resolveSlot1SbeSettings(),
+  };
+}
+
 export function parseScreenshotHeroCameraModeInput(
   store: ScreenshotStore,
   value: unknown
@@ -615,7 +629,7 @@ export function parseStoredScreenshotPresetConfig(
   heroPhoneLocation: ProceduralDeviceLocation | null;
   heroKeyLightPosition: ProceduralLightPosition | null;
   heroKeyLightSettings: ProceduralKeyLightSettings | null;
-  slot1SbeSettings: Slot1SbeSettings | null;
+  slotSbeSettings: Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>>;
   heroCameraMode: ProceduralCameraMode | null;
   heroCameraSettings: ProceduralCameraSettings | null;
 } {
@@ -633,7 +647,7 @@ export function parseStoredScreenshotPresetConfig(
       heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
       heroKeyLightPosition: parseScreenshotHeroKeyLightPositionInput(store, undefined),
       heroKeyLightSettings: parseScreenshotHeroKeyLightSettingsInput(store, undefined, undefined),
-      slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, undefined),
+      slotSbeSettings: parseScreenshotSlotSbeSettingsInput(store, undefined, undefined),
       heroCameraMode: parseScreenshotHeroCameraModeInput(store, undefined),
       heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, undefined),
     };
@@ -653,6 +667,7 @@ export function parseStoredScreenshotPresetConfig(
     "heroPhoneLocation" in raw ||
     "heroKeyLightPosition" in raw ||
     "heroKeyLightSettings" in raw ||
+    "slotSbeSettings" in raw ||
     "slot1SbeSettings" in raw ||
     "heroCameraMode" in raw ||
     "heroCameraSettings" in raw
@@ -674,7 +689,7 @@ export function parseStoredScreenshotPresetConfig(
         raw.heroKeyLightSettings,
         raw.heroKeyLightPosition
       ),
-      slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, raw.slot1SbeSettings),
+      slotSbeSettings: parseScreenshotSlotSbeSettingsInput(store, raw.slotSbeSettings, raw.slot1SbeSettings),
       heroCameraMode: parseScreenshotHeroCameraModeInput(store, raw.heroCameraMode),
       heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, raw.heroCameraSettings),
     };
@@ -693,7 +708,7 @@ export function parseStoredScreenshotPresetConfig(
     heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
     heroKeyLightPosition: parseScreenshotHeroKeyLightPositionInput(store, undefined),
     heroKeyLightSettings: parseScreenshotHeroKeyLightSettingsInput(store, undefined, undefined),
-    slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, undefined),
+    slotSbeSettings: parseScreenshotSlotSbeSettingsInput(store, undefined, undefined),
     heroCameraMode: parseScreenshotHeroCameraModeInput(store, undefined),
     heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, undefined),
   };
@@ -727,7 +742,7 @@ export function serializeScreenshotPresetRecord(record: {
     heroPhoneLocation: config.heroPhoneLocation,
     heroKeyLightPosition: config.heroKeyLightPosition,
     heroKeyLightSettings: config.heroKeyLightSettings,
-    slot1SbeSettings: config.slot1SbeSettings,
+    slotSbeSettings: config.slotSbeSettings,
     heroCameraMode: config.heroCameraMode,
     heroCameraSettings: config.heroCameraSettings,
     updatedAt: record.updatedAt,
@@ -744,13 +759,6 @@ function parseStoredScreenshotSlotPalettes(
 
   for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
     next[slot] = parseStoredScreenshotPalette(store, raw[String(slot)] ?? fallbackPalette);
-  }
-
-  if (store === "ios") {
-    const sharedRaw = raw["1"] ?? raw["2"] ?? fallbackPalette;
-    const sharedPalette = parseStoredScreenshotPalette(store, sharedRaw);
-    next[1] = sharedPalette;
-    next[2] = sharedPalette;
   }
 
   return next;

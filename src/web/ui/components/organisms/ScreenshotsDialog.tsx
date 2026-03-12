@@ -103,7 +103,7 @@ export type ScreenshotDialogStartPayload = {
   heroPhoneLocation: ProceduralDeviceLocation | null;
   heroKeyLightPosition: ProceduralLightPosition | null;
   heroKeyLightSettings: ProceduralKeyLightSettings | null;
-  slot1SbeSettings: Slot1SbeSettings | null;
+  slotSbeSettings: Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>>;
   heroCameraMode: ProceduralCameraMode | null;
   heroCameraSettings: ProceduralCameraSettings | null;
   renderedSlots: ScreenshotRenderedSlotPayload[];
@@ -121,7 +121,7 @@ export type ScreenshotPresetConfig = {
   heroPhoneLocation: ProceduralDeviceLocation | null;
   heroKeyLightPosition: ProceduralLightPosition | null;
   heroKeyLightSettings: ProceduralKeyLightSettings | null;
-  slot1SbeSettings: Slot1SbeSettings | null;
+  slotSbeSettings?: Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>>;
   heroCameraMode: ProceduralCameraMode | null;
   heroCameraSettings: ProceduralCameraSettings | null;
 };
@@ -171,6 +171,7 @@ type ScreenshotSlotTitleLineGapMap = Record<ScreenshotTemplateSlot, number>;
 type ScreenshotSlotFileMap = Record<ScreenshotTemplateSlot, File | null>;
 type ScreenshotSlotPreviewUrlMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPreviewErrorMap = Record<ScreenshotTemplateSlot, string>;
+type ScreenshotSlotSbeMap = Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>>;
 
 function createEmptySlotTitleMap(): ScreenshotSlotTitleMap {
   return {
@@ -259,6 +260,28 @@ function createEmptySlotPreviewErrorMap(): ScreenshotSlotPreviewErrorMap {
   };
 }
 
+function createDefaultSlotSbeMap(): ScreenshotSlotSbeMap {
+  return {
+    1: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+    2: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+  };
+}
+
+function createSlotSbeMap(preset?: ScreenshotPresetConfig): ScreenshotSlotSbeMap {
+  const raw = preset?.slotSbeSettings;
+  if (raw && typeof raw === 'object') {
+    return {
+      1: resolveSlot1SbeSettings(raw[1]),
+      2: resolveSlot1SbeSettings(raw[2]),
+    };
+  }
+  const legacy = resolveSlot1SbeSettings((preset as { slot1SbeSettings?: Slot1SbeSettings | null } | undefined)?.slot1SbeSettings);
+  return {
+    1: legacy,
+    2: legacy,
+  };
+}
+
 function createSlotTitleLineGapMap(preset?: ScreenshotPresetConfig): ScreenshotSlotTitleLineGapMap {
   const next = createEmptySlotTitleLineGapMap();
   const raw = preset?.slotTitleLineGaps ?? {};
@@ -281,15 +304,6 @@ function createSlotPaletteMap(
 
   for (const entry of SCREENSHOT_TEMPLATE_SLOTS) {
     next[entry] = resolveScreenshotTemplatePalette(store, raw[entry] ?? fallbackPalette);
-  }
-
-  if (store === 'ios') {
-    const sharedPalette = resolveScreenshotTemplatePalette(
-      store,
-      raw[1] ?? raw[2] ?? fallbackPalette
-    );
-    next[1] = sharedPalette;
-    next[2] = sharedPalette;
   }
 
   return next;
@@ -348,13 +362,29 @@ function mergeScreenshotPresetConfig(
     heroPhoneLocation: draft.heroPhoneLocation ?? base.heroPhoneLocation,
     heroKeyLightPosition: draft.heroKeyLightPosition ?? base.heroKeyLightPosition,
     heroKeyLightSettings: draft.heroKeyLightSettings ?? base.heroKeyLightSettings,
-    slot1SbeSettings: draft.slot1SbeSettings ?? base.slot1SbeSettings,
+    slotSbeSettings: draft.slotSbeSettings ?? base.slotSbeSettings,
     heroCameraMode: draft.heroCameraMode ?? base.heroCameraMode,
     heroCameraSettings: draft.heroCameraSettings ?? base.heroCameraSettings,
   };
 }
 
-function getSlotPaletteTargets(store: ScreenshotStore, slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
+function getSlotPaletteTargetsForKey(
+  slot: ScreenshotTemplateSlot,
+  key: keyof ScreenshotTemplatePalette
+): ScreenshotTemplateSlot[] {
+  if (key === 'phoneColor') {
+    return [...SCREENSHOT_TEMPLATE_SLOTS];
+  }
+  if (slot === 1 || slot === 2) {
+    if (key === 'accent') {
+      return [1, 2];
+    }
+    return [slot];
+  }
+  return [slot];
+}
+
+function getSlotScreenshotTargets(slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
   if (slot === 1 || slot === 2) {
     return [1, 2];
   }
@@ -581,9 +611,9 @@ export default function ScreenshotsDialog({
     ios: resolveProceduralKeyLightSettings(),
     play_store: resolveProceduralKeyLightSettings(),
   });
-  const [slot1SbeSettingsByStore, setSlot1SbeSettingsByStore] = useState<Record<ScreenshotStore, Slot1SbeSettings | null>>({
-    ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
-    play_store: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+  const [slotSbeSettingsByStore, setSlotSbeSettingsByStore] = useState<Record<ScreenshotStore, ScreenshotSlotSbeMap>>({
+    ios: createDefaultSlotSbeMap(),
+    play_store: createDefaultSlotSbeMap(),
   });
   const [heroCameraModeByStore, setHeroCameraModeByStore] = useState<Record<ScreenshotStore, ProceduralCameraMode | null>>({
     ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
@@ -622,7 +652,7 @@ export default function ScreenshotsDialog({
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
       heroKeyLightPosition: resolveProceduralLightPosition(),
       heroKeyLightSettings: resolveProceduralKeyLightSettings(),
-      slot1SbeSettings: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+      slotSbeSettings: createDefaultSlotSbeMap(),
       heroCameraMode: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
       heroCameraSettings: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }),
@@ -641,7 +671,7 @@ export default function ScreenshotsDialog({
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
       heroKeyLightPosition: resolveProceduralLightPosition(),
       heroKeyLightSettings: resolveProceduralKeyLightSettings(),
-      slot1SbeSettings: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+      slotSbeSettings: createDefaultSlotSbeMap(),
       heroCameraMode: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
       heroCameraSettings: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }),
@@ -716,10 +746,10 @@ export default function ScreenshotsDialog({
         initialPlayPreset?.heroKeyLightPosition
       ),
     };
-    const sharedSbeSettings = resolveSlot1SbeSettings(sharedPresetSource?.slot1SbeSettings);
-    const nextSlot1SbeSettings: Record<ScreenshotStore, Slot1SbeSettings | null> = {
-      ios: sharedSbeSettings,
-      play_store: sharedSbeSettings,
+    const sharedSbeSettings = createSlotSbeMap(sharedPresetSource);
+    const nextSlotSbeSettings: Record<ScreenshotStore, ScreenshotSlotSbeMap> = {
+      ios: { ...sharedSbeSettings },
+      play_store: { ...sharedSbeSettings },
     };
     const nextHeroCameraMode: Record<ScreenshotStore, ProceduralCameraMode | null> = {
       ios: resolveProceduralCameraMode(initialIosPreset?.heroCameraMode),
@@ -754,7 +784,7 @@ export default function ScreenshotsDialog({
     setHeroPhoneLocationByStore(nextHeroPhoneLocation);
     setHeroKeyLightPositionByStore(nextHeroKeyLightPosition);
     setHeroKeyLightSettingsByStore(nextHeroKeyLightSettings);
-    setSlot1SbeSettingsByStore(nextSlot1SbeSettings);
+    setSlotSbeSettingsByStore(nextSlotSbeSettings);
     setHeroCameraModeByStore(nextHeroCameraMode);
     setHeroCameraSettingsByStore(nextHeroCameraSettings);
     setPanelState({
@@ -778,7 +808,7 @@ export default function ScreenshotsDialog({
         heroPhoneLocation: nextHeroPhoneLocation.ios,
         heroKeyLightPosition: nextHeroKeyLightPosition.ios,
         heroKeyLightSettings: nextHeroKeyLightSettings.ios,
-        slot1SbeSettings: nextSlot1SbeSettings.ios,
+        slotSbeSettings: nextSlotSbeSettings.ios,
         heroCameraMode: nextHeroCameraMode.ios,
         heroCameraSettings: nextHeroCameraSettings.ios,
       }),
@@ -794,7 +824,7 @@ export default function ScreenshotsDialog({
         heroPhoneLocation: nextHeroPhoneLocation.play_store,
         heroKeyLightPosition: nextHeroKeyLightPosition.play_store,
         heroKeyLightSettings: nextHeroKeyLightSettings.play_store,
-        slot1SbeSettings: nextSlot1SbeSettings.play_store,
+        slotSbeSettings: nextSlotSbeSettings.play_store,
         heroCameraMode: nextHeroCameraMode.play_store,
         heroCameraSettings: nextHeroCameraSettings.play_store,
       }),
@@ -871,9 +901,9 @@ export default function ScreenshotsDialog({
       ),
     [heroKeyLightPositionByStore, heroKeyLightSettingsByStore, store]
   );
-  const resolvedSlot1SbeSettings = useMemo(
-    () => resolveSlot1SbeSettings(slot1SbeSettingsByStore[store]),
-    [slot1SbeSettingsByStore, store]
+  const resolvedSelectedSlotSbeSettings = useMemo(
+    () => resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[slot]),
+    [slot, slotSbeSettingsByStore, store]
   );
   const resolvedHeroCameraMode = useMemo(
     () => resolveProceduralCameraMode(heroCameraModeByStore[store]),
@@ -927,7 +957,10 @@ export default function ScreenshotsDialog({
       heroKeyLightSettingsByStore[targetStore],
       heroKeyLightPositionByStore[targetStore]
     );
-    const slot1SbeSettings = resolveSlot1SbeSettings(slot1SbeSettingsByStore[targetStore]);
+    const slotSbeSettings = {
+      1: resolveSlot1SbeSettings(slotSbeSettingsByStore[targetStore]?.[1]),
+      2: resolveSlot1SbeSettings(slotSbeSettingsByStore[targetStore]?.[2]),
+    } satisfies ScreenshotSlotSbeMap;
     const heroCameraMode = resolveProceduralCameraMode(heroCameraModeByStore[targetStore]);
     const heroCameraSettings = resolveProceduralCameraSettings(heroCameraSettingsByStore[targetStore]);
     const preset = {
@@ -942,7 +975,7 @@ export default function ScreenshotsDialog({
       heroPhoneLocation,
       heroKeyLightPosition,
       heroKeyLightSettings,
-      slot1SbeSettings,
+      slotSbeSettings,
       heroCameraMode,
       heroCameraSettings,
     };
@@ -950,7 +983,7 @@ export default function ScreenshotsDialog({
       preset,
       key: JSON.stringify(preset),
     };
-  }, [heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, slot1SbeSettingsByStore, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
   const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
@@ -967,7 +1000,8 @@ export default function ScreenshotsDialog({
   const handleSlotFileChange = useCallback((nextFile: File | null) => {
     if (!nextFile) return;
 
-    const requestKey = `${store}:${slot}`;
+    const targetSlots = getSlotScreenshotTargets(slot);
+    const requestKey = `${store}:${targetSlots.join('-')}`;
     const requestId = (fileReadRequestIdsRef.current[requestKey] ?? 0) + 1;
     fileReadRequestIdsRef.current[requestKey] = requestId;
 
@@ -975,14 +1009,14 @@ export default function ScreenshotsDialog({
       ...prev,
       [store]: {
         ...prev[store],
-        [slot]: nextFile,
+        ...Object.fromEntries(targetSlots.map((targetSlot) => [targetSlot, nextFile])),
       },
     }));
     setFilePreviewErrorsByStore((prev) => ({
       ...prev,
       [store]: {
         ...prev[store],
-        [slot]: '',
+        ...Object.fromEntries(targetSlots.map((targetSlot) => [targetSlot, ''])),
       },
     }));
 
@@ -993,7 +1027,7 @@ export default function ScreenshotsDialog({
           ...prev,
           [store]: {
             ...prev[store],
-            [slot]: nextValue,
+            ...Object.fromEntries(targetSlots.map((targetSlot) => [targetSlot, nextValue])),
           },
         }));
       })
@@ -1003,14 +1037,16 @@ export default function ScreenshotsDialog({
           ...prev,
           [store]: {
             ...prev[store],
-            [slot]: '',
+            ...Object.fromEntries(targetSlots.map((targetSlot) => [targetSlot, ''])),
           },
         }));
         setFilePreviewErrorsByStore((prev) => ({
           ...prev,
           [store]: {
             ...prev[store],
-            [slot]: 'Dosya preview için okunamadı.',
+            ...Object.fromEntries(
+              targetSlots.map((targetSlot) => [targetSlot, 'Dosya preview için okunamadı.'])
+            ),
           },
         }));
       });
@@ -1023,7 +1059,7 @@ export default function ScreenshotsDialog({
           ios: { ...prev.ios },
           play_store: { ...prev.play_store },
         };
-        const targets = key === 'phoneColor' ? [...SCREENSHOT_TEMPLATE_SLOTS] : getSlotPaletteTargets(store, slot);
+        const targets = getSlotPaletteTargetsForKey(slot, key);
         for (const { id: targetStore } of SCREENSHOT_STORES) {
           for (const targetSlot of targets) {
             const basePalette = resolveScreenshotTemplatePalette(targetStore, nextPalettes[targetStore][targetSlot]);
@@ -1156,8 +1192,17 @@ export default function ScreenshotsDialog({
       };
       for (const { id: targetStore } of SCREENSHOT_STORES) {
         const resetPalette = getScreenshotTemplateDefaultPalette(targetStore);
-        for (const targetSlot of getSlotPaletteTargets(targetStore, slot)) {
-          nextPalettes[targetStore][targetSlot] = resetPalette;
+        for (const field of getScreenshotTemplatePaletteFields(targetStore, slot)) {
+          for (const targetSlot of getSlotPaletteTargetsForKey(slot, field.key)) {
+            const basePalette = resolveScreenshotTemplatePalette(
+              targetStore,
+              nextPalettes[targetStore][targetSlot]
+            );
+            nextPalettes[targetStore][targetSlot] = resolveScreenshotTemplatePalette(targetStore, {
+              ...basePalette,
+              [field.key]: resetPalette[field.key],
+            });
+          }
         }
       }
       return nextPalettes;
@@ -1217,9 +1262,15 @@ export default function ScreenshotsDialog({
       [store]: resolveProceduralKeyLightSettings(),
     }));
     if (slot === 1 || slot === 2) {
-      setSlot1SbeSettingsByStore((prev) => ({
-        ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
-        play_store: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+      setSlotSbeSettingsByStore((prev) => ({
+        ios: {
+          ...prev.ios,
+          [slot]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+        },
+        play_store: {
+          ...prev.play_store,
+          [slot]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+        },
       }));
     }
     setHeroCameraModeByStore((prev) => ({
@@ -1310,15 +1361,21 @@ export default function ScreenshotsDialog({
   const handleSlot1SbeSettingsChange = useCallback(
     (key: keyof Slot1SbeSettings, value: number | string) => {
       if (slot > 2) return;
-      setSlot1SbeSettingsByStore((prev) => ({
-        ios: resolveSlot1SbeSettings({
-          ...(prev.ios ?? DEFAULT_SLOT_1_SBE_SETTINGS),
-          [key]: value,
-        }),
-        play_store: resolveSlot1SbeSettings({
-          ...(prev.play_store ?? DEFAULT_SLOT_1_SBE_SETTINGS),
-          [key]: value,
-        }),
+      setSlotSbeSettingsByStore((prev) => ({
+        ios: {
+          ...prev.ios,
+          [slot]: resolveSlot1SbeSettings({
+            ...(prev.ios?.[slot] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+            [key]: value,
+          }),
+        },
+        play_store: {
+          ...prev.play_store,
+          [slot]: resolveSlot1SbeSettings({
+            ...(prev.play_store?.[slot] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+            [key]: value,
+          }),
+        },
       }));
     },
     [slot]
@@ -1346,6 +1403,9 @@ export default function ScreenshotsDialog({
       slotPrimaryColor
     );
     const slotTitleLineGap = titleLineGapByStore[store]?.[targetSlot] ?? 0;
+
+    const targetSlotSbeSettings =
+      targetSlot <= 2 ? resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[targetSlot]) : null;
 
     await ensureGoogleFontsLoaded([
       {
@@ -1378,7 +1438,7 @@ export default function ScreenshotsDialog({
         heroPhoneLocation: resolvedHeroPhoneLocation,
         heroKeyLightPosition: resolvedHeroKeyLightPosition,
         heroKeyLightSettings: resolvedHeroKeyLightSettings,
-        slot1SbeSettings: targetSlot <= 2 ? resolvedSlot1SbeSettings : null,
+        slot1SbeSettings: targetSlotSbeSettings,
         heroCameraMode: resolvedHeroCameraMode,
         heroCameraSettings: resolvedHeroCameraSettings,
         width: previewCanvasSize.width,
@@ -1400,7 +1460,7 @@ export default function ScreenshotsDialog({
       screenshotSource: screenshotDataUrl || undefined,
     });
     return canvas;
-  }, [browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, resolvedSlot1SbeSettings, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setPanelState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1581,7 +1641,11 @@ export default function ScreenshotsDialog({
                   heroPhoneLocation={previewSlot <= 2 ? resolvedHeroPhoneLocation : null}
                   heroKeyLightPosition={previewSlot <= 2 ? resolvedHeroKeyLightPosition : null}
                   heroKeyLightSettings={previewSlot <= 2 ? resolvedHeroKeyLightSettings : null}
-                  slot1SbeSettings={previewSlot <= 2 ? resolvedSlot1SbeSettings : null}
+                  slot1SbeSettings={
+                    previewSlot <= 2
+                      ? resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[previewSlot])
+                      : null
+                  }
                   heroCameraMode={previewSlot <= 2 ? resolvedHeroCameraMode : null}
                   heroCameraSettings={previewSlot <= 2 ? resolvedHeroCameraSettings : null}
                   screenshotUrl={filePreviewUrlsByStore[store]?.[previewSlot] ?? ''}
@@ -1805,12 +1869,12 @@ export default function ScreenshotsDialog({
                       <label key={key} className="screenshots-shape-item">
                         <div className="screenshots-slider-copy">
                           <strong>{label}</strong>
-                          <code>{resolvedSlot1SbeSettings?.[key] ?? 0}</code>
+                          <code>{resolvedSelectedSlotSbeSettings?.[key] ?? 0}</code>
                         </div>
                         <input
                           type="number"
                           step={step}
-                          value={resolvedSlot1SbeSettings?.[key] ?? 0}
+                          value={resolvedSelectedSlotSbeSettings?.[key] ?? 0}
                           disabled={isLocked}
                           onChange={(event) =>
                             handleSlot1SbeSettingsChange(key, Number(event.target.value))
@@ -1825,13 +1889,13 @@ export default function ScreenshotsDialog({
                       <div className="screenshots-palette-controls">
                         <input
                           type="color"
-                          value={resolvedSlot1SbeSettings?.lineColor ?? '#f38219'}
+                          value={resolvedSelectedSlotSbeSettings?.lineColor ?? '#f38219'}
                           disabled={isLocked}
                           onChange={(event) =>
                             handleSlot1SbeSettingsChange('lineColor', event.target.value)
                           }
                         />
-                        <code>{resolvedSlot1SbeSettings?.lineColor ?? '#f38219'}</code>
+                        <code>{resolvedSelectedSlotSbeSettings?.lineColor ?? '#f38219'}</code>
                       </div>
                     </label>
                   </div>
@@ -2229,7 +2293,10 @@ export default function ScreenshotsDialog({
                     heroPhoneLocation: resolvedHeroPhoneLocation,
                     heroKeyLightPosition: resolvedHeroKeyLightPosition,
                     heroKeyLightSettings: resolvedHeroKeyLightSettings,
-                    slot1SbeSettings: resolvedSlot1SbeSettings,
+                    slotSbeSettings: {
+                      1: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[1]),
+                      2: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[2]),
+                    },
                     heroCameraMode: resolvedHeroCameraMode,
                     heroCameraSettings: resolvedHeroCameraSettings,
                     renderedSlots,

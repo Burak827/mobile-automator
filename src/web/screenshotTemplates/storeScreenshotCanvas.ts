@@ -47,6 +47,7 @@ const PLAY_STORE_TITLE_BLOCK_X = 76;
 const PLAY_STORE_TITLE_BLOCK_Y = 114;
 const IOS_TITLE_LINE_HEIGHT_MULTIPLIER = 0.95;
 const PLAY_STORE_TITLE_LINE_HEIGHT_MULTIPLIER = 0.94;
+const SCREEN_PLACEHOLDER_SURFACE = '#ddd7d0';
 
 export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
@@ -233,9 +234,7 @@ export function drawIosSplitHeroBackdrop(
   }
 ): void {
   const { palette, width, height } = input;
-  const background = ctx.createLinearGradient(0, 0, 0, height);
-  background.addColorStop(0, '#f8f4ee');
-  background.addColorStop(1, '#efe9e2');
+  const background = createHeroBackgroundGradient(ctx, palette.accent, height);
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
@@ -254,8 +253,6 @@ export function drawIosSplitHeroBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
-    accentColor: input.slot === 1 ? palette.accent : undefined,
-    accentFirstLine: input.slot === 1,
   });
 }
 
@@ -456,9 +453,7 @@ export function drawPlayStoreSplitHeroBackdrop(
   }
 ): void {
   const { palette, width, height } = input;
-  const background = ctx.createLinearGradient(0, 0, 0, height);
-  background.addColorStop(0, '#f8f4ee');
-  background.addColorStop(1, '#efe9e2');
+  const background = createHeroBackgroundGradient(ctx, palette.accent, height);
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
@@ -477,8 +472,6 @@ export function drawPlayStoreSplitHeroBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
-    accentColor: input.slot === 1 ? palette.accent : undefined,
-    accentFirstLine: input.slot === 1,
   });
 }
 
@@ -707,7 +700,15 @@ function drawDeviceScreen(
     placeholderSubColor: string;
   }
 ): void {
-  fillRoundedRect(ctx, input.x, input.y, input.width, input.height, input.radius, input.background);
+  fillRoundedRect(
+    ctx,
+    input.x,
+    input.y,
+    input.width,
+    input.height,
+    input.radius,
+    input.screenshotImage ? input.background : SCREEN_PLACEHOLDER_SURFACE
+  );
 
   ctx.save();
   roundedRectPath(ctx, input.x, input.y, input.width, input.height, input.radius);
@@ -811,6 +812,15 @@ function drawSoftShadow(
   ctx.ellipse(0, 0, radius, radius * 0.74, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+}
+
+function createHeroBackgroundGradient(ctx: any, accentHex: string, height: number): any {
+  const accentRgb = hexToRgb(accentHex);
+  const background = ctx.createLinearGradient(0, 0, 0, height);
+  background.addColorStop(0, rgba(mixRgb(accentRgb, { r: 255, g: 255, b: 255 }, 0.9), 1));
+  background.addColorStop(0.46, rgba(mixRgb(accentRgb, { r: 247, g: 242, b: 237 }, 0.84), 1));
+  background.addColorStop(1, rgba(mixRgb(accentRgb, { r: 239, g: 233, b: 226 }, 0.8), 1));
+  return background;
 }
 
 function coverRect(
@@ -1091,6 +1101,20 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
     r: Number.parseInt(full.slice(0, 2), 16),
     g: Number.parseInt(full.slice(2, 4), 16),
     b: Number.parseInt(full.slice(4, 6), 16),
+  };
+}
+
+function mixRgb(
+  base: { r: number; g: number; b: number },
+  target: { r: number; g: number; b: number },
+  targetWeight: number
+): { r: number; g: number; b: number } {
+  const weight = clampNumber(targetWeight, 0, 1);
+  const baseWeight = 1 - weight;
+  return {
+    r: Math.round(base.r * baseWeight + target.r * weight),
+    g: Math.round(base.g * baseWeight + target.g * weight),
+    b: Math.round(base.b * baseWeight + target.b * weight),
   };
 }
 

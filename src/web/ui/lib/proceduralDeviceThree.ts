@@ -50,6 +50,7 @@ export const DEFAULT_PROCEDURAL_DEVICE_PROFILE: ProceduralDeviceProfile = {
 const PROCEDURAL_DEVICE_SCREEN_INSET_MM = 2;
 const PROCEDURAL_DEVICE_ISLAND_Z_OFFSET_MM = 0.001;
 const PROCEDURAL_DEVICE_CURVE_SEGMENT_MULTIPLIER = 2;
+const PROCEDURAL_PLACEHOLDER_SURFACE = '#ddd7d0';
 
 export type ProceduralDeviceScreenMetrics = {
   insetX: number;
@@ -574,7 +575,7 @@ function renderPlaceholderScreenToCanvas(
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  ctx.fillStyle = '#f5f5f2';
+  ctx.fillStyle = PROCEDURAL_PLACEHOLDER_SURFACE;
   ctx.fillRect(0, 0, widthPx, heightPx);
 
   ctx.fillStyle = '#6b6b6d';

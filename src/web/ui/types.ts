@@ -256,6 +256,8 @@ export type ScreenshotSlot1SbePayload = {
   originZ: number;
 };
 
+export type ScreenshotSlotSbeMapPayload = Partial<Record<number, ScreenshotSlot1SbePayload>>;
+
 export type ScreenshotRendererPayload = {
   template: string;
   engine: string;
@@ -276,7 +278,7 @@ export type ScreenshotGenerateResponse = {
   heroPhoneLocation?: ScreenshotHeroPhoneLocationPayload | null;
   heroKeyLightPosition?: ScreenshotHeroLightPositionPayload | null;
   heroKeyLightSettings?: ScreenshotHeroLightSettingsPayload | null;
-  slot1SbeSettings?: ScreenshotSlot1SbePayload | null;
+  slotSbeSettings?: ScreenshotSlotSbeMapPayload;
   heroCameraMode?: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
   heroCameraSettings?: ScreenshotHeroCameraSettingsPayload | null;
   stagedInputPath: string;
@@ -299,7 +301,7 @@ export type ScreenshotPresetPayload = {
   heroPhoneLocation: ScreenshotHeroPhoneLocationPayload | null;
   heroKeyLightPosition: ScreenshotHeroLightPositionPayload | null;
   heroKeyLightSettings: ScreenshotHeroLightSettingsPayload | null;
-  slot1SbeSettings: ScreenshotSlot1SbePayload | null;
+  slotSbeSettings?: ScreenshotSlotSbeMapPayload;
   heroCameraMode: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
   heroCameraSettings: ScreenshotHeroCameraSettingsPayload | null;
   updatedAt: string;

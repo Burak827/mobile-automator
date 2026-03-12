@@ -25,22 +25,15 @@ export type ScreenshotTemplatePaletteField = {
 };
 
 const IOS_HERO_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
-  { key: 'accent', label: 'Accent', description: 'Poster arka planı ve vurgu çizgileri.' },
-  { key: 'bgInk', label: 'Ink', description: 'Koyu yazılar ve ikincil şekiller.' },
+  { key: 'accent', label: 'Background', description: 'Hero arka plan tonu.' },
+  { key: 'bgInk', label: 'Title', description: 'Başlık ana rengi.' },
   { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
 ];
 
 const IOS_POSTER_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
-  { key: 'accent', label: 'Accent', description: 'Poster arka planı ve vurgu çizgileri.' },
-  { key: 'cream', label: 'Cream', description: 'Açık yüzeyler ve açık başlık rengi.' },
+  { key: 'accent', label: 'Background', description: 'Poster arka plan tonu.' },
+  { key: 'cream', label: 'Title', description: 'Başlık ana rengi.' },
   { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
-];
-
-const PLAY_STORE_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
-  { key: 'accent', label: 'Accent', description: 'Android vurgu rengi ve aktif chip yüzeyleri.' },
-  { key: 'bgInk', label: 'Ink', description: 'Kartlar ve ikinci seviye koyu bloklar.' },
-  { key: 'cream', label: 'Light', description: 'Açık kartlar ve açık metin yüzeyi.' },
-  { key: 'muted', label: 'Muted', description: 'İkincil metin ve soft dekor tonları.' },
 ];
 
 const DEFAULT_IOS_PALETTE: ScreenshotTemplatePalette = {
@@ -77,13 +70,8 @@ export function getScreenshotTemplatePaletteFields(
   store: ScreenshotStore,
   slot?: ScreenshotTemplateSlot
 ): ScreenshotTemplatePaletteField[] {
-  if (store === 'play_store') return PLAY_STORE_PALETTE_FIELDS;
-  if (slot === 1) {
-    return IOS_HERO_PALETTE_FIELDS.filter((field) => field.key !== 'bgInk');
-  }
-  if (slot === 2) {
-    return IOS_HERO_PALETTE_FIELDS.filter((field) => field.key !== 'accent');
-  }
+  void store;
+  if (slot === 1 || slot === 2) return IOS_HERO_PALETTE_FIELDS;
   if (slot != null && slot >= 3) return IOS_POSTER_PALETTE_FIELDS;
   return IOS_HERO_PALETTE_FIELDS;
 }
