@@ -73,6 +73,9 @@ export type ScreenshotRenderedSlotPayload = {
   slot: ScreenshotTemplateSlot;
   title: string;
   renderedImageBase64?: string | null;
+  sourceImageBase64?: string | null;
+  sourceFileName?: string | null;
+  sourceMimeType?: string | null;
   rendererMode: 'canvas-2d' | 'procedural-three';
   palette: ScreenshotTemplatePalette;
   titleTypography: ScreenshotTitleTypography;
@@ -85,7 +88,7 @@ export type ScreenshotDialogStartPayload = {
   locale: string;
   slot: ScreenshotTemplateSlot;
   title: string;
-  file: File;
+  file?: File | null;
   renderedImageBase64?: string | null;
   rendererMode?: 'canvas-2d' | 'procedural-three';
   palette: ScreenshotTemplatePalette;
@@ -165,6 +168,9 @@ type PanelKey = 'rotation' | 'color' | 'shape' | 'location' | 'light' | 'sbe';
 type ScreenshotSlotTitleMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPaletteMap = Record<ScreenshotTemplateSlot, ScreenshotTemplatePalette>;
 type ScreenshotSlotTitleLineGapMap = Record<ScreenshotTemplateSlot, number>;
+type ScreenshotSlotFileMap = Record<ScreenshotTemplateSlot, File | null>;
+type ScreenshotSlotPreviewUrlMap = Record<ScreenshotTemplateSlot, string>;
+type ScreenshotSlotPreviewErrorMap = Record<ScreenshotTemplateSlot, string>;
 
 function createEmptySlotTitleMap(): ScreenshotSlotTitleMap {
   return {
@@ -217,6 +223,39 @@ function createEmptySlotTitleLineGapMap(): ScreenshotSlotTitleLineGapMap {
     4: 0,
     5: 0,
     6: 0,
+  };
+}
+
+function createEmptySlotFileMap(): ScreenshotSlotFileMap {
+  return {
+    1: null,
+    2: null,
+    3: null,
+    4: null,
+    5: null,
+    6: null,
+  };
+}
+
+function createEmptySlotPreviewUrlMap(): ScreenshotSlotPreviewUrlMap {
+  return {
+    1: '',
+    2: '',
+    3: '',
+    4: '',
+    5: '',
+    6: '',
+  };
+}
+
+function createEmptySlotPreviewErrorMap(): ScreenshotSlotPreviewErrorMap {
+  return {
+    1: '',
+    2: '',
+    3: '',
+    4: '',
+    5: '',
+    6: '',
   };
 }
 
@@ -336,6 +375,11 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
     reader.readAsDataURL(file);
   });
+}
+
+function dataUrlToBase64(dataUrl: string): string | null {
+  const [, base64 = ''] = dataUrl.split(',');
+  return base64 || null;
 }
 
 function drawCanvasError(canvas: HTMLCanvasElement, message: string): void {
@@ -494,10 +538,22 @@ export default function ScreenshotsDialog({
     ios: createEmptyScreenshotTitleExtraLineColorsMap(),
     play_store: createEmptyScreenshotTitleExtraLineColorsMap(),
   });
-  const [file, setFile] = useState<File | null>(null);
-  const [fileInputKey, setFileInputKey] = useState(0);
-  const [filePreviewUrl, setFilePreviewUrl] = useState<string>('');
-  const [filePreviewError, setFilePreviewError] = useState<string>('');
+  const [filesByStore, setFilesByStore] = useState<Record<ScreenshotStore, ScreenshotSlotFileMap>>({
+    ios: createEmptySlotFileMap(),
+    play_store: createEmptySlotFileMap(),
+  });
+  const [filePreviewUrlsByStore, setFilePreviewUrlsByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotPreviewUrlMap>
+  >({
+    ios: createEmptySlotPreviewUrlMap(),
+    play_store: createEmptySlotPreviewUrlMap(),
+  });
+  const [filePreviewErrorsByStore, setFilePreviewErrorsByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotPreviewErrorMap>
+  >({
+    ios: createEmptySlotPreviewErrorMap(),
+    play_store: createEmptySlotPreviewErrorMap(),
+  });
   const [slotPalettesByStore, setSlotPalettesByStore] = useState<Record<ScreenshotStore, ScreenshotSlotPaletteMap>>({
     ios: createSlotPaletteMap('ios'),
     play_store: createSlotPaletteMap('play_store'),
@@ -545,7 +601,7 @@ export default function ScreenshotsDialog({
     light: false,
     sbe: false,
   });
-  const latestFileReadRef = useRef(0);
+  const fileReadRequestIdsRef = useRef<Record<string, number>>({});
   const wasOpenRef = useRef(false);
   const [fontLoadVersion, setFontLoadVersion] = useState(0);
   const [isPersistingPreset, setIsPersistingPreset] = useState(false);
@@ -609,25 +665,30 @@ export default function ScreenshotsDialog({
       presets?.play_store,
       readScreenshotDraft(appId, 'play_store')
     );
+    const sharedPresetSource = initialIosPreset ?? initialPlayPreset;
     const nextSlotPalettes: Record<ScreenshotStore, ScreenshotSlotPaletteMap> = {
-      ios: createSlotPaletteMap('ios', initialIosPreset),
-      play_store: createSlotPaletteMap('play_store', initialPlayPreset),
+      ios: createSlotPaletteMap('ios', sharedPresetSource),
+      play_store: createSlotPaletteMap('play_store', sharedPresetSource),
     };
+    const sharedSlotTitles = createSlotTitleMap(sharedPresetSource);
     const nextSlotTitles: Record<ScreenshotStore, ScreenshotSlotTitleMap> = {
-      ios: createSlotTitleMap(initialIosPreset),
-      play_store: createSlotTitleMap(initialPlayPreset),
+      ios: { ...sharedSlotTitles },
+      play_store: { ...sharedSlotTitles },
     };
+    const sharedSlotTitleExtraLineColors = createSlotTitleExtraLineColorsMap(sharedPresetSource);
     const nextSlotTitleExtraLineColors: Record<ScreenshotStore, ScreenshotSlotTitleExtraLineColorsMap> = {
-      ios: createSlotTitleExtraLineColorsMap(initialIosPreset),
-      play_store: createSlotTitleExtraLineColorsMap(initialPlayPreset),
+      ios: { ...sharedSlotTitleExtraLineColors },
+      play_store: { ...sharedSlotTitleExtraLineColors },
     };
+    const sharedSlotTitleTypography = createSlotTitleTypographyMap('ios', sharedPresetSource);
     const nextSlotTitleTypography: Record<ScreenshotStore, ScreenshotSlotTitleTypographyMap> = {
-      ios: createSlotTitleTypographyMap('ios', initialIosPreset),
-      play_store: createSlotTitleTypographyMap('play_store', initialPlayPreset),
+      ios: { ...sharedSlotTitleTypography },
+      play_store: { ...sharedSlotTitleTypography },
     };
+    const sharedTitleLineGap = createSlotTitleLineGapMap(sharedPresetSource);
     const nextTitleLineGap: Record<ScreenshotStore, ScreenshotSlotTitleLineGapMap> = {
-      ios: createSlotTitleLineGapMap(initialIosPreset),
-      play_store: createSlotTitleLineGapMap(initialPlayPreset),
+      ios: { ...sharedTitleLineGap },
+      play_store: { ...sharedTitleLineGap },
     };
     const nextHeroPhonePose: Record<ScreenshotStore, IosHeroPhonePose | null> = {
       ios: resolveIosHeroPhonePose(initialIosPreset?.heroPhonePose),
@@ -655,9 +716,10 @@ export default function ScreenshotsDialog({
         initialPlayPreset?.heroKeyLightPosition
       ),
     };
+    const sharedSbeSettings = resolveSlot1SbeSettings(sharedPresetSource?.slot1SbeSettings);
     const nextSlot1SbeSettings: Record<ScreenshotStore, Slot1SbeSettings | null> = {
-      ios: resolveSlot1SbeSettings(initialIosPreset?.slot1SbeSettings),
-      play_store: resolveSlot1SbeSettings(initialPlayPreset?.slot1SbeSettings),
+      ios: sharedSbeSettings,
+      play_store: sharedSbeSettings,
     };
     const nextHeroCameraMode: Record<ScreenshotStore, ProceduralCameraMode | null> = {
       ios: resolveProceduralCameraMode(initialIosPreset?.heroCameraMode),
@@ -674,9 +736,18 @@ export default function ScreenshotsDialog({
     setTitleLineGapByStore(nextTitleLineGap);
     setTitleExtraLineColorsByStore(nextSlotTitleExtraLineColors);
     setTitleTypographyByStore(nextSlotTitleTypography);
-    setFile(null);
-    setFilePreviewUrl('');
-    setFilePreviewError('');
+    setFilesByStore({
+      ios: createEmptySlotFileMap(),
+      play_store: createEmptySlotFileMap(),
+    });
+    setFilePreviewUrlsByStore({
+      ios: createEmptySlotPreviewUrlMap(),
+      play_store: createEmptySlotPreviewUrlMap(),
+    });
+    setFilePreviewErrorsByStore({
+      ios: createEmptySlotPreviewErrorMap(),
+      play_store: createEmptySlotPreviewErrorMap(),
+    });
     setSlotPalettesByStore(nextSlotPalettes);
     setHeroPhonePoseByStore(nextHeroPhonePose);
     setHeroPhoneShapeByStore(nextHeroPhoneShape);
@@ -728,33 +799,7 @@ export default function ScreenshotsDialog({
         heroCameraSettings: nextHeroCameraSettings.play_store,
       }),
     };
-    setFileInputKey((prev) => prev + 1);
   }, [appId, defaultLocale, defaultStore, isOpen, presets]);
-
-  useEffect(() => {
-    if (!file) {
-      setFilePreviewUrl('');
-      setFilePreviewError('');
-      return;
-    }
-
-    const requestId = latestFileReadRef.current + 1;
-    latestFileReadRef.current = requestId;
-    setFilePreviewError('');
-
-    const reader = new FileReader();
-    reader.onerror = () => {
-      if (latestFileReadRef.current !== requestId) return;
-      setFilePreviewError('Dosya preview için okunamadı.');
-      setFilePreviewUrl('');
-    };
-    reader.onload = () => {
-      if (latestFileReadRef.current !== requestId) return;
-      const nextValue = typeof reader.result === 'string' ? reader.result : '';
-      setFilePreviewUrl(nextValue);
-    };
-    reader.readAsDataURL(file);
-  }, [file]);
 
   const outputPath = useMemo(() => {
     const normalizedLocale = locale.trim() || 'en-US';
@@ -910,23 +955,85 @@ export default function ScreenshotsDialog({
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
   const isHeroSlot = slot <= 2;
-  const canStart = Boolean(file) && locale.trim().length > 0 && !isLocked;
+  const selectedSlotFile = filesByStore[store]?.[slot] ?? null;
+  const selectedSlotPreviewError = filePreviewErrorsByStore[store]?.[slot] ?? '';
+  const hasAnySlotScreenshot = useMemo(
+    () => SCREENSHOT_TEMPLATE_SLOTS.some((targetSlot) => Boolean(filesByStore[store]?.[targetSlot])),
+    [filesByStore, store]
+  );
+  const canStart = locale.trim().length > 0 && hasAnySlotScreenshot && !isLocked;
   const canSaveSettings = Boolean(appId) && !isLocked && !isPersistingPreset;
+
+  const handleSlotFileChange = useCallback((nextFile: File | null) => {
+    if (!nextFile) return;
+
+    const requestKey = `${store}:${slot}`;
+    const requestId = (fileReadRequestIdsRef.current[requestKey] ?? 0) + 1;
+    fileReadRequestIdsRef.current[requestKey] = requestId;
+
+    setFilesByStore((prev) => ({
+      ...prev,
+      [store]: {
+        ...prev[store],
+        [slot]: nextFile,
+      },
+    }));
+    setFilePreviewErrorsByStore((prev) => ({
+      ...prev,
+      [store]: {
+        ...prev[store],
+        [slot]: '',
+      },
+    }));
+
+    void readFileAsDataUrl(nextFile)
+      .then((nextValue) => {
+        if (fileReadRequestIdsRef.current[requestKey] !== requestId) return;
+        setFilePreviewUrlsByStore((prev) => ({
+          ...prev,
+          [store]: {
+            ...prev[store],
+            [slot]: nextValue,
+          },
+        }));
+      })
+      .catch(() => {
+        if (fileReadRequestIdsRef.current[requestKey] !== requestId) return;
+        setFilePreviewUrlsByStore((prev) => ({
+          ...prev,
+          [store]: {
+            ...prev[store],
+            [slot]: '',
+          },
+        }));
+        setFilePreviewErrorsByStore((prev) => ({
+          ...prev,
+          [store]: {
+            ...prev[store],
+            [slot]: 'Dosya preview için okunamadı.',
+          },
+        }));
+      });
+  }, [slot, store]);
 
   const handlePaletteChange = useCallback(
     (key: keyof ScreenshotTemplatePalette, value: string) => {
       setSlotPalettesByStore((prev) => {
-        const nextStorePalettes = { ...prev[store] };
-        // phoneColor is global — propagate to ALL slots
-        const targets = key === 'phoneColor' ? [...SCREENSHOT_TEMPLATE_SLOTS] : getSlotPaletteTargets(store, slot);
-        for (const targetSlot of targets) {
-          const basePalette = resolveScreenshotTemplatePalette(store, nextStorePalettes[targetSlot]);
-          nextStorePalettes[targetSlot] = resolveScreenshotTemplatePalette(store, { ...basePalette, [key]: value });
-        }
-        return {
-          ...prev,
-          [store]: nextStorePalettes,
+        const nextPalettes: Record<ScreenshotStore, ScreenshotSlotPaletteMap> = {
+          ios: { ...prev.ios },
+          play_store: { ...prev.play_store },
         };
+        const targets = key === 'phoneColor' ? [...SCREENSHOT_TEMPLATE_SLOTS] : getSlotPaletteTargets(store, slot);
+        for (const { id: targetStore } of SCREENSHOT_STORES) {
+          for (const targetSlot of targets) {
+            const basePalette = resolveScreenshotTemplatePalette(targetStore, nextPalettes[targetStore][targetSlot]);
+            nextPalettes[targetStore][targetSlot] = resolveScreenshotTemplatePalette(targetStore, {
+              ...basePalette,
+              [key]: value,
+            });
+          }
+        }
+        return nextPalettes;
       });
     },
     [slot, store]
@@ -934,43 +1041,70 @@ export default function ScreenshotsDialog({
 
   const handleTitleChange = useCallback((value: string) => {
     setTitlesByStore((prev) => ({
-      ...prev,
-      [store]: {
-        ...prev[store],
+      ios: {
+        ...prev.ios,
+        [slot]: value,
+      },
+      play_store: {
+        ...prev.play_store,
         [slot]: value,
       },
     }));
-  }, [slot, store]);
+  }, [slot]);
 
   const handleTitleTypographyChange = useCallback(
     (key: keyof ScreenshotTitleTypography, value: string | number) => {
       setTitleTypographyByStore((prev) => ({
-        ...prev,
-        [store]: {
-          ...prev[store],
-          [slot]: resolveScreenshotTitleTypography(store, slot, {
-            ...prev[store][slot],
+        ios: {
+          ...prev.ios,
+          [slot]: resolveScreenshotTitleTypography('ios', slot, {
+            ...prev.ios[slot],
+            [key]: value,
+          }),
+        },
+        play_store: {
+          ...prev.play_store,
+          [slot]: resolveScreenshotTitleTypography('play_store', slot, {
+            ...prev.play_store[slot],
             [key]: value,
           }),
         },
       }));
     },
-    [slot, store]
+    [slot]
   );
+
+  const handleTitleLineGapChange = useCallback((value: number) => {
+    const nextValue = Number.isFinite(value) ? value : 0;
+    setTitleLineGapByStore((prev) => ({
+      ios: {
+        ...prev.ios,
+        [slot]: nextValue,
+      },
+      play_store: {
+        ...prev.play_store,
+        [slot]: nextValue,
+      },
+    }));
+  }, [slot]);
 
   const handleTitleExtraLineColorChange = useCallback(
     (lineIndex: number, value: string) => {
       setTitleExtraLineColorsByStore((prev) => {
-        const nextStoreMap = { ...prev[store] };
-        const nextSlotColors = [...(nextStoreMap[slot] ?? [])].slice(
+        const nextSlotColors = [...(prev[store]?.[slot] ?? [])].slice(
           0,
           MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS
         );
         nextSlotColors[lineIndex] = value;
-        nextStoreMap[slot] = nextSlotColors.slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS);
         return {
-          ...prev,
-          [store]: nextStoreMap,
+          ios: {
+            ...prev.ios,
+            [slot]: nextSlotColors.slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS),
+          },
+          play_store: {
+            ...prev.play_store,
+            [slot]: nextSlotColors.slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS),
+          },
         };
       });
     },
@@ -1005,43 +1139,57 @@ export default function ScreenshotsDialog({
 
   const handleResetSelectedSlot = useCallback(() => {
     setTitlesByStore((prev) => ({
-      ...prev,
-      [store]: {
-        ...prev[store],
+      ios: {
+        ...prev.ios,
+        [slot]: '',
+      },
+      play_store: {
+        ...prev.play_store,
         [slot]: '',
       },
     }));
 
     setSlotPalettesByStore((prev) => {
-      const nextStorePalettes = { ...prev[store] };
-      const resetPalette = getScreenshotTemplateDefaultPalette(store);
-      for (const targetSlot of getSlotPaletteTargets(store, slot)) {
-        nextStorePalettes[targetSlot] = resetPalette;
-      }
-      return {
-        ...prev,
-        [store]: nextStorePalettes,
+      const nextPalettes: Record<ScreenshotStore, ScreenshotSlotPaletteMap> = {
+        ios: { ...prev.ios },
+        play_store: { ...prev.play_store },
       };
+      for (const { id: targetStore } of SCREENSHOT_STORES) {
+        const resetPalette = getScreenshotTemplateDefaultPalette(targetStore);
+        for (const targetSlot of getSlotPaletteTargets(targetStore, slot)) {
+          nextPalettes[targetStore][targetSlot] = resetPalette;
+        }
+      }
+      return nextPalettes;
     });
 
     setTitleTypographyByStore((prev) => ({
-      ...prev,
-      [store]: {
-        ...prev[store],
-        [slot]: resolveScreenshotTitleTypography(store, slot, undefined),
+      ios: {
+        ...prev.ios,
+        [slot]: resolveScreenshotTitleTypography('ios', slot, undefined),
+      },
+      play_store: {
+        ...prev.play_store,
+        [slot]: resolveScreenshotTitleTypography('play_store', slot, undefined),
       },
     }));
     setTitleLineGapByStore((prev) => ({
-      ...prev,
-      [store]: {
-        ...prev[store],
+      ios: {
+        ...prev.ios,
+        [slot]: 0,
+      },
+      play_store: {
+        ...prev.play_store,
         [slot]: 0,
       },
     }));
     setTitleExtraLineColorsByStore((prev) => ({
-      ...prev,
-      [store]: {
-        ...prev[store],
+      ios: {
+        ...prev.ios,
+        [slot]: [],
+      },
+      play_store: {
+        ...prev.play_store,
         [slot]: [],
       },
     }));
@@ -1070,8 +1218,8 @@ export default function ScreenshotsDialog({
     }));
     if (slot === 1 || slot === 2) {
       setSlot1SbeSettingsByStore((prev) => ({
-        ...prev,
-        [store]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+        ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+        play_store: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
       }));
     }
     setHeroCameraModeByStore((prev) => ({
@@ -1163,19 +1311,22 @@ export default function ScreenshotsDialog({
     (key: keyof Slot1SbeSettings, value: number | string) => {
       if (slot > 2) return;
       setSlot1SbeSettingsByStore((prev) => ({
-        ...prev,
-        [store]: resolveSlot1SbeSettings({
-          ...(prev[store] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+        ios: resolveSlot1SbeSettings({
+          ...(prev.ios ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+          [key]: value,
+        }),
+        play_store: resolveSlot1SbeSettings({
+          ...(prev.play_store ?? DEFAULT_SLOT_1_SBE_SETTINGS),
           [key]: value,
         }),
       }));
     },
-    [slot, store]
+    [slot]
   );
 
   const renderBrowserScreenshotCanvas = useCallback(async (
     targetSlot: ScreenshotTemplateSlot,
-    screenshotDataUrl: string
+    screenshotDataUrl?: string
   ) => {
     const slotTitle = titlesByStore[store]?.[targetSlot] ?? '';
     const slotTitleTypography = resolveScreenshotTitleTypography(
@@ -1220,7 +1371,7 @@ export default function ScreenshotsDialog({
         titleExtraLineColors: slotTitleExtraLineColors,
         titleLineGap: slotTitleLineGap,
         palette: slotPalette,
-        screenshotUrl: screenshotDataUrl,
+        screenshotUrl: screenshotDataUrl ?? '',
         imageLoader: browserImageLoader,
         heroPhonePose: resolvedHeroPhonePose,
         heroPhoneShape: resolvedHeroPhoneShape,
@@ -1291,9 +1442,12 @@ export default function ScreenshotsDialog({
         return prev;
       }
       return {
-        ...prev,
-        [store]: {
-          ...prev[store],
+        ios: {
+          ...prev.ios,
+          [slot]: nextSlotColors,
+        },
+        play_store: {
+          ...prev.play_store,
           [slot]: nextSlotColors,
         },
       };
@@ -1430,7 +1584,7 @@ export default function ScreenshotsDialog({
                   slot1SbeSettings={previewSlot <= 2 ? resolvedSlot1SbeSettings : null}
                   heroCameraMode={previewSlot <= 2 ? resolvedHeroCameraMode : null}
                   heroCameraSettings={previewSlot <= 2 ? resolvedHeroCameraSettings : null}
-                  screenshotUrl={filePreviewUrl}
+                  screenshotUrl={filePreviewUrlsByStore[store]?.[previewSlot] ?? ''}
                   imageLoader={browserImageLoader}
                   fontLoadVersion={fontLoadVersion}
                   disabled={isLocked}
@@ -1488,17 +1642,7 @@ export default function ScreenshotsDialog({
                   type="text"
                   inputMode="decimal"
                   value={resolvedTitleLineGap}
-                  onChange={(event) =>
-                    setTitleLineGapByStore((prev) => ({
-                      ...prev,
-                      [store]: {
-                        ...prev[store],
-                        [slot]: Number.isFinite(Number(event.target.value))
-                          ? Number(event.target.value)
-                          : 0,
-                      },
-                    }))
-                  }
+                  onChange={(event) => handleTitleLineGapChange(Number(event.target.value))}
                   disabled={isLocked}
                 />
               </label>
@@ -1557,21 +1701,25 @@ export default function ScreenshotsDialog({
             <label className="screenshot-file-field">
               Screenshot
               <input
-                key={fileInputKey}
                 type="file"
                 accept="image/png,image/jpeg,image/jpg"
                 disabled={isLocked}
                 onChange={(event) => {
                   const nextFile = event.target.files?.[0] ?? null;
-                  setFile(nextFile);
+                  handleSlotFileChange(nextFile);
+                  event.currentTarget.value = '';
                 }}
               />
             </label>
 
             <div className="screenshot-file-meta">
-              {file ? `${file.name} - ${formatFileSize(file.size)}` : 'Henüz dosya seçilmedi.'}
+              {selectedSlotFile
+                ? `${selectedSlotFile.name} - ${formatFileSize(selectedSlotFile.size)}`
+                : 'Henüz dosya seçilmedi.'}
             </div>
-            {filePreviewError ? <div className="screenshot-file-error">{filePreviewError}</div> : null}
+            {selectedSlotPreviewError ? (
+              <div className="screenshot-file-error">{selectedSlotPreviewError}</div>
+            ) : null}
 
             <section className="screenshots-palette-panel">
               <button
@@ -1981,7 +2129,13 @@ export default function ScreenshotsDialog({
               disabled={!canSaveSettings}
               onClick={() => {
                 void handleSaveCurrentSettings().catch((error) => {
-                  setFilePreviewError(error instanceof Error ? error.message : String(error));
+                  setFilePreviewErrorsByStore((prev) => ({
+                    ...prev,
+                    [store]: {
+                      ...prev[store],
+                      [slot]: error instanceof Error ? error.message : String(error),
+                    },
+                  }));
                 });
               }}
             >
@@ -1993,16 +2147,25 @@ export default function ScreenshotsDialog({
               disabled={!canStart}
               onClick={() => {
                 const nextLocale = locale.trim();
-                if (!file || !nextLocale) return;
+                if (!nextLocale) return;
 
                 void (async () => {
-                  const screenshotDataUrl = filePreviewUrl || (await readFileAsDataUrl(file));
                   const renderedSlots: ScreenshotRenderedSlotPayload[] = [];
+                  const firstAvailableFile =
+                    filesByStore[store][slot] ??
+                    SCREENSHOT_TEMPLATE_SLOTS.map((targetSlot) => filesByStore[store][targetSlot]).find(
+                      (candidate): candidate is File => Boolean(candidate)
+                    ) ??
+                    null;
 
                   for (const targetSlot of SCREENSHOT_TEMPLATE_SLOTS) {
+                    const slotFile = filesByStore[store][targetSlot];
+                    const slotScreenshotDataUrl =
+                      filePreviewUrlsByStore[store]?.[targetSlot] ||
+                      (slotFile ? await readFileAsDataUrl(slotFile) : '');
                     const renderedCanvas = await renderBrowserScreenshotCanvas(
                       targetSlot,
-                      screenshotDataUrl
+                      slotScreenshotDataUrl
                     );
                     const dataUrl = renderedCanvas.toDataURL('image/png');
                     const slotPalette = resolveScreenshotTemplatePalette(
@@ -2026,6 +2189,11 @@ export default function ScreenshotsDialog({
                       slot: targetSlot,
                       title: slotTitle.trim(),
                       renderedImageBase64: dataUrl.split(',')[1] ?? null,
+                      sourceImageBase64: slotScreenshotDataUrl
+                        ? dataUrlToBase64(slotScreenshotDataUrl)
+                        : null,
+                      sourceFileName: slotFile?.name ?? null,
+                      sourceMimeType: slotFile?.type || null,
                       rendererMode:
                         targetSlot <= 2
                           ? 'procedural-three'
@@ -2046,7 +2214,7 @@ export default function ScreenshotsDialog({
                     store,
                     slot,
                     title: resolvedTitle.trim(),
-                    file,
+                    file: selectedSlotFile ?? firstAvailableFile,
                     renderedImageBase64: renderedSlots.find((item) => item.slot === slot)?.renderedImageBase64 ?? null,
                     rendererMode: renderedSlots.find((item) => item.slot === slot)?.rendererMode ?? 'canvas-2d',
                     palette: resolvedPalette,
@@ -2067,7 +2235,13 @@ export default function ScreenshotsDialog({
                     renderedSlots,
                   });
                 })().catch((error) => {
-                  setFilePreviewError(error instanceof Error ? error.message : String(error));
+                  setFilePreviewErrorsByStore((prev) => ({
+                    ...prev,
+                    [store]: {
+                      ...prev[store],
+                      [slot]: error instanceof Error ? error.message : String(error),
+                    },
+                  }));
                 });
               }}
             >

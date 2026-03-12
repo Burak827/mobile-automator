@@ -23,15 +23,15 @@ export const SLOT_1_SBE_ORIGIN = {
 export const DEFAULT_SLOT_1_SBE_SETTINGS: Slot1SbeSettings = {
   lineWidth: 4,
   lineColor: '#f38219',
-  opacity: 0.7,
-  scale: 0.82,
-  angleDeg: 18,
-  copyCount: 1,
-  positionX: 1036,
-  positionY: 1980,
-  originX: SLOT_1_SBE_ORIGIN.x + 20,
-  originY: SLOT_1_SBE_ORIGIN.y,
-  originZ: 0,
+  opacity: 0.4,
+  scale: 1.94,
+  angleDeg: 2.8,
+  copyCount: 90,
+  positionX: 660,
+  positionY: 2600,
+  originX: 333.21617798354,
+  originY: 532,
+  originZ: 0.09,
 };
 
 export function resolveSlot1SbeSettings(

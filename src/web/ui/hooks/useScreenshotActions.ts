@@ -8,7 +8,6 @@ import type {
 import {
   fetchScreenshotPresets,
   generateScreenshot,
-  readFileAsBase64,
   saveScreenshotPreset,
 } from '../services/screenshotService';
 
@@ -97,7 +96,6 @@ export function useScreenshotActions(params: {
     locale,
     slot,
     title,
-    file,
     renderedImageBase64,
     rendererMode,
     palette,
@@ -135,11 +133,18 @@ export function useScreenshotActions(params: {
     pushStatus(`📸 ${slotsToGenerate.length} screenshot üretimi başlatıldı (${store}/${locale})`);
 
     try {
-      const imageBase64 = await readFileAsBase64(file);
       let successCount = 0;
       for (const renderedSlot of slotsToGenerate) {
         pushStatus(`Slot ${renderedSlot.slot} render output yazılıyor...`);
         try {
+          const slotSourceImageBase64 =
+            renderedSlot.sourceImageBase64 ??
+            renderedSlot.renderedImageBase64 ??
+            null;
+          if (!slotSourceImageBase64) {
+            throw new Error(`Slot ${renderedSlot.slot} için kaynak görsel bulunamadı.`);
+          }
+
           const payload = await generateScreenshot(selectedAppId, store, {
             locale,
             slot: renderedSlot.slot,
@@ -161,9 +166,9 @@ export function useScreenshotActions(params: {
             slot1SbeSettings,
             heroCameraMode,
             heroCameraSettings,
-            fileName: file.name,
-            mimeType: file.type || 'image/png',
-            imageBase64,
+            fileName: renderedSlot.sourceFileName ?? `slot-${renderedSlot.slot}.png`,
+            mimeType: renderedSlot.sourceMimeType || 'image/png',
+            imageBase64: slotSourceImageBase64,
           });
 
           successCount += 1;
