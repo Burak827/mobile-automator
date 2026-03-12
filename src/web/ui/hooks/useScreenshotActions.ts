@@ -41,7 +41,11 @@ export function useScreenshotActions(params: {
         heroPhonePose: preset.heroPhonePose ?? null,
         heroPhoneShape: preset.heroPhoneShape ?? null,
         heroPhoneLocation: preset.heroPhoneLocation ?? null,
+        heroKeyLightPosition: preset.heroKeyLightPosition ?? null,
+        heroKeyLightSettings: preset.heroKeyLightSettings ?? null,
+        slot1SbeSettings: preset.slot1SbeSettings ?? null,
         heroCameraMode: preset.heroCameraMode ?? null,
+        heroCameraSettings: preset.heroCameraSettings ?? null,
       };
     }
     setScreenshotPresets(nextPresets);
@@ -79,7 +83,11 @@ export function useScreenshotActions(params: {
         heroPhonePose: payload.preset.heroPhonePose ?? null,
         heroPhoneShape: payload.preset.heroPhoneShape ?? null,
         heroPhoneLocation: payload.preset.heroPhoneLocation ?? null,
+        heroKeyLightPosition: payload.preset.heroKeyLightPosition ?? null,
+        heroKeyLightSettings: payload.preset.heroKeyLightSettings ?? null,
+        slot1SbeSettings: payload.preset.slot1SbeSettings ?? null,
         heroCameraMode: payload.preset.heroCameraMode ?? null,
+        heroCameraSettings: payload.preset.heroCameraSettings ?? null,
       },
     }));
   }, [selectedAppId, setScreenshotPresets]);
@@ -102,7 +110,11 @@ export function useScreenshotActions(params: {
     heroPhonePose,
     heroPhoneShape,
     heroPhoneLocation,
+    heroKeyLightPosition,
+    heroKeyLightSettings,
+    slot1SbeSettings,
     heroCameraMode,
+    heroCameraSettings,
     renderedSlots,
   }: ScreenshotDialogStartPayload) => {
     if (!selectedAppId) return;
@@ -144,7 +156,11 @@ export function useScreenshotActions(params: {
             heroPhonePose,
             heroPhoneShape,
             heroPhoneLocation,
+            heroKeyLightPosition,
+            heroKeyLightSettings,
+            slot1SbeSettings,
             heroCameraMode,
+            heroCameraSettings,
             fileName: file.name,
             mimeType: file.type || 'image/png',
             imageBase64,
@@ -171,7 +187,11 @@ export function useScreenshotActions(params: {
                 heroPhonePose: payload.heroPhonePose ?? null,
                 heroPhoneShape: payload.heroPhoneShape ?? null,
                 heroPhoneLocation: payload.heroPhoneLocation ?? null,
+                heroKeyLightPosition: payload.heroKeyLightPosition ?? null,
+                heroKeyLightSettings: payload.heroKeyLightSettings ?? null,
+                slot1SbeSettings: payload.slot1SbeSettings ?? null,
                 heroCameraMode: payload.heroCameraMode ?? null,
+                heroCameraSettings: payload.heroCameraSettings ?? null,
               },
             }));
           }

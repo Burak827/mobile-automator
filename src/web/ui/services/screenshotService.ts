@@ -53,7 +53,11 @@ export async function saveScreenshotPreset(
       heroPhonePose: preset.heroPhonePose,
       heroPhoneShape: preset.heroPhoneShape,
       heroPhoneLocation: preset.heroPhoneLocation,
+      heroKeyLightPosition: preset.heroKeyLightPosition,
+      heroKeyLightSettings: preset.heroKeyLightSettings,
+      slot1SbeSettings: preset.slot1SbeSettings,
       heroCameraMode: preset.heroCameraMode,
+      heroCameraSettings: preset.heroCameraSettings,
     }),
   });
 }

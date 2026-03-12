@@ -6,6 +6,7 @@ import {
 import type { ScreenshotStore } from './screenshotStores.js';
 
 export type ScreenshotSlotTitleExtraLineColorsMap = Record<ScreenshotTemplateSlot, string[]>;
+export const MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS = 5;
 
 export function createEmptyScreenshotTitleExtraLineColorsMap(): ScreenshotSlotTitleExtraLineColorsMap {
   return {
@@ -34,8 +35,13 @@ export function syncScreenshotTitleExtraLineColors(
   lineCount: number,
   primaryColor: string
 ): string[] {
-  const targetCount = Math.max(0, lineCount - 1);
-  const next = Array.isArray(extraLineColors) ? [...extraLineColors] : [];
+  const targetCount = Math.max(
+    0,
+    Math.min(MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS, lineCount - 1)
+  );
+  const next = Array.isArray(extraLineColors)
+    ? [...extraLineColors].slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS)
+    : [];
 
   if (next.length > targetCount) {
     return next.slice(0, targetCount);
@@ -56,7 +62,17 @@ export function resolveScreenshotTitleLineColors(
   extraLineColors?: readonly string[]
 ): string[] {
   const primaryColor = getDefaultScreenshotTitlePrimaryColor(store, slot, palette);
-  return [primaryColor, ...syncScreenshotTitleExtraLineColors(extraLineColors, lineCount, primaryColor)];
+  const syncedExtraColors = syncScreenshotTitleExtraLineColors(
+    extraLineColors,
+    lineCount,
+    primaryColor
+  );
+  const overflowCount = Math.max(0, lineCount - 1 - syncedExtraColors.length);
+  return [
+    primaryColor,
+    ...syncedExtraColors,
+    ...Array.from({ length: overflowCount }, () => primaryColor),
+  ];
 }
 
 export function resolveStoredScreenshotTitleExtraLineColorsMap(
@@ -68,7 +84,10 @@ export function resolveStoredScreenshotTitleExtraLineColorsMap(
   for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
     const entry = raw[String(slot)];
     next[slot] = Array.isArray(entry)
-      ? entry.map((item) => normalizeHexColor(item, '#000000')).filter(Boolean)
+      ? entry
+          .slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS)
+          .map((item) => normalizeHexColor(item, '#000000'))
+          .filter(Boolean)
       : [];
   }
 

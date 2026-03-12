@@ -15,6 +15,7 @@ export type ScreenshotTemplatePalette = {
   bgInk: string;
   cream: string;
   muted: string;
+  phoneColor: string;
 };
 
 export type ScreenshotTemplatePaletteField = {
@@ -26,11 +27,13 @@ export type ScreenshotTemplatePaletteField = {
 const IOS_HERO_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
   { key: 'accent', label: 'Accent', description: 'Poster arka planı ve vurgu çizgileri.' },
   { key: 'bgInk', label: 'Ink', description: 'Koyu yazılar ve ikincil şekiller.' },
+  { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
 ];
 
 const IOS_POSTER_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
   { key: 'accent', label: 'Accent', description: 'Poster arka planı ve vurgu çizgileri.' },
   { key: 'cream', label: 'Cream', description: 'Açık yüzeyler ve açık başlık rengi.' },
+  { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
 ];
 
 const PLAY_STORE_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
@@ -46,6 +49,7 @@ const DEFAULT_IOS_PALETTE: ScreenshotTemplatePalette = {
   bgInk: '#232324',
   cream: '#f7f2ed',
   muted: '#d7dadd',
+  phoneColor: '#000000',
 };
 
 const DEFAULT_PLAY_STORE_PALETTE: ScreenshotTemplatePalette = {
@@ -54,6 +58,7 @@ const DEFAULT_PLAY_STORE_PALETTE: ScreenshotTemplatePalette = {
   bgInk: '#183328',
   cream: '#eef8f1',
   muted: '#b9d6c3',
+  phoneColor: '#000000',
 };
 
 export function getScreenshotTemplateCanvasSize(store: ScreenshotStore): {
@@ -80,6 +85,12 @@ export function getScreenshotTemplatePaletteFields(
   slot?: ScreenshotTemplateSlot
 ): ScreenshotTemplatePaletteField[] {
   if (store === 'play_store') return PLAY_STORE_PALETTE_FIELDS;
+  if (slot === 1) {
+    return IOS_HERO_PALETTE_FIELDS.filter((field) => field.key !== 'bgInk');
+  }
+  if (slot === 2) {
+    return IOS_HERO_PALETTE_FIELDS.filter((field) => field.key !== 'accent');
+  }
   if (slot != null && slot >= 3) return IOS_POSTER_PALETTE_FIELDS;
   return IOS_HERO_PALETTE_FIELDS;
 }
@@ -95,6 +106,7 @@ export function resolveScreenshotTemplatePalette(
     bgInk: normalizeHexColor(input?.bgInk, defaults.bgInk),
     cream: normalizeHexColor(input?.cream, defaults.cream),
     muted: normalizeHexColor(input?.muted, defaults.muted),
+    phoneColor: normalizeHexColor(input?.phoneColor, defaults.phoneColor),
   };
 }
 

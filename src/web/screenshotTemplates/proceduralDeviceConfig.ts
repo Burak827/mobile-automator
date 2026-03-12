@@ -10,14 +10,35 @@ export type ProceduralDeviceLocation = {
   z: number;
 };
 
+export type ProceduralLightPosition = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ProceduralKeyLightSettings = {
+  azimuthDeg: number;
+  elevationDeg: number;
+  distance: number;
+  intensity: number;
+  color: string;
+};
+
 export type ProceduralDeviceShape = {
   widthMm: number;
   lengthMm: number;
   thicknessMm: number;
   edgeSmoothnessMm: number;
+  islandWidthMm: number;
+  islandLengthMm: number;
+  islandRadiusMm: number;
 };
 
 export type ProceduralCameraMode = 'perspective' | 'orthographic';
+export type ProceduralCameraSettings = {
+  perspectiveFov: number;
+  orthographicFrustumHeight: number;
+};
 
 export type IosHeroPhonePose = ProceduralDeviceRotation;
 export type IosHeroPhoneShape = ProceduralDeviceShape;
@@ -39,12 +60,20 @@ export const DEFAULT_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
   lengthMm: 150,
   thicknessMm: 8.75,
   edgeSmoothnessMm: 9,
+  islandWidthMm: 23.1,
+  islandLengthMm: 5.8,
+  islandRadiusMm: 2.9,
 };
 
-export const DEFAULT_PROCEDURAL_CAMERA_MODE: ProceduralCameraMode = 'perspective';
+export const DEFAULT_PROCEDURAL_CAMERA_MODE: ProceduralCameraMode = 'orthographic';
+export const DEFAULT_PROCEDURAL_CAMERA_SETTINGS: ProceduralCameraSettings = {
+  perspectiveFov: 34,
+  orthographicFrustumHeight: 120,
+};
 
 export function getDefaultCameraModeForSlot(slot: number): ProceduralCameraMode {
-  return slot <= 2 ? 'perspective' : 'orthographic';
+  void slot;
+  return DEFAULT_PROCEDURAL_CAMERA_MODE;
 }
 
 export const PROCEDURAL_CAMERA_POSITION = {
@@ -52,6 +81,20 @@ export const PROCEDURAL_CAMERA_POSITION = {
   y: 200,
   z: 0,
 } as const;
+
+export const DEFAULT_PROCEDURAL_KEY_LIGHT_POSITION: ProceduralLightPosition = {
+  x: 28.678821817552304,
+  y: 40.95760221444959,
+  z: 0,
+};
+
+export const DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS: ProceduralKeyLightSettings = {
+  azimuthDeg: 35,
+  elevationDeg: 0,
+  distance: 50,
+  intensity: 100,
+  color: '#ffffff',
+};
 
 export const PROCEDURAL_CAMERA_UP = {
   x: 0,
@@ -62,9 +105,9 @@ export const PROCEDURAL_CAMERA_UP = {
 export const PROCEDURAL_DEVICE_BASE_ROTATION_X = -90;
 
 export const DEFAULT_IOS_HERO_PHONE_POSE: IosHeroPhonePose = {
-  rotateX: 42,
-  rotateY: 330,
-  rotateZ: 209,
+  rotateX: 48,
+  rotateY: 335,
+  rotateZ: 205,
 };
 export const DEFAULT_IOS_HERO_PHONE_LOCATION: ProceduralDeviceLocation = {
   x: -5,
@@ -93,6 +136,80 @@ export function resolveProceduralDeviceLocation(
   };
 }
 
+export function resolveProceduralLightPosition(
+  value?: Partial<ProceduralLightPosition> | null
+): ProceduralLightPosition {
+  return {
+    x: clampFiniteNumber(Number(value?.x ?? DEFAULT_PROCEDURAL_KEY_LIGHT_POSITION.x), -4000, 4000),
+    y: clampFiniteNumber(Number(value?.y ?? DEFAULT_PROCEDURAL_KEY_LIGHT_POSITION.y), -4000, 4000),
+    z: clampFiniteNumber(Number(value?.z ?? DEFAULT_PROCEDURAL_KEY_LIGHT_POSITION.z), -4000, 4000),
+  };
+}
+
+export function resolveProceduralKeyLightSettings(
+  value?: Partial<ProceduralKeyLightSettings> | null,
+  fallbackPosition?: Partial<ProceduralLightPosition> | null
+): ProceduralKeyLightSettings {
+  const derivedFromPosition =
+    fallbackPosition != null ? proceduralKeyLightSettingsFromPosition(fallbackPosition) : null;
+
+  return {
+    azimuthDeg: clampFiniteNumber(
+      Number(value?.azimuthDeg ?? derivedFromPosition?.azimuthDeg ?? DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.azimuthDeg),
+      -3600,
+      3600
+    ),
+    elevationDeg: clampFiniteNumber(
+      Number(value?.elevationDeg ?? derivedFromPosition?.elevationDeg ?? DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.elevationDeg),
+      -89.9,
+      89.9
+    ),
+    distance: positiveFiniteNumber(
+      Number(value?.distance ?? derivedFromPosition?.distance ?? DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.distance),
+      DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.distance
+    ),
+    intensity: nonNegativeFiniteNumber(
+      Number(value?.intensity ?? DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.intensity),
+      DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.intensity
+    ),
+    color: normalizeHexColor(value?.color, DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.color),
+  };
+}
+
+export function proceduralKeyLightPositionFromSettings(
+  value?: Partial<ProceduralKeyLightSettings> | null
+): ProceduralLightPosition {
+  const settings = resolveProceduralKeyLightSettings(value);
+  const azimuth = degToRad(settings.azimuthDeg);
+  const elevation = degToRad(settings.elevationDeg);
+  const planarDistance = settings.distance * Math.cos(elevation);
+
+  return {
+    x: planarDistance * Math.sin(azimuth),
+    y: planarDistance * Math.cos(azimuth),
+    z: settings.distance * Math.sin(elevation),
+  };
+}
+
+export function proceduralKeyLightSettingsFromPosition(
+  value?: Partial<ProceduralLightPosition> | null
+): ProceduralKeyLightSettings {
+  const position = resolveProceduralLightPosition(value);
+  const distance = Math.sqrt(
+    position.x * position.x + position.y * position.y + position.z * position.z
+  );
+  const safeDistance = distance > 0 ? distance : DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS.distance;
+  const elevationDeg = radToDeg(Math.asin(position.z / safeDistance));
+  const azimuthDeg = radToDeg(Math.atan2(position.x, position.y));
+
+  return {
+    ...DEFAULT_PROCEDURAL_KEY_LIGHT_SETTINGS,
+    azimuthDeg,
+    elevationDeg,
+    distance: safeDistance,
+  };
+}
+
 export function resolveProceduralDeviceShape(
   value?: (
     Partial<ProceduralDeviceShape> & {
@@ -103,6 +220,9 @@ export function resolveProceduralDeviceShape(
       thickness?: number | null;
       edgeRadius?: number | null;
       edgeSmoothness?: number | null;
+      islandWidth?: number | null;
+      islandLength?: number | null;
+      islandRadius?: number | null;
     }
   ) | null
 ): ProceduralDeviceShape {
@@ -112,7 +232,10 @@ export function resolveProceduralDeviceShape(
     ('widthMm' in value ||
       'lengthMm' in value ||
       'thicknessMm' in value ||
-      'edgeSmoothnessMm' in value);
+      'edgeSmoothnessMm' in value ||
+      'islandWidthMm' in value ||
+      'islandLengthMm' in value ||
+      'islandRadiusMm' in value);
   const hasLegacyShapeFields =
     value != null &&
     typeof value === 'object' &&
@@ -122,7 +245,10 @@ export function resolveProceduralDeviceShape(
       'depth' in value ||
       'thickness' in value ||
       'edgeRadius' in value ||
-      'edgeSmoothness' in value);
+      'edgeSmoothness' in value ||
+      'islandWidth' in value ||
+      'islandLength' in value ||
+      'islandRadius' in value);
 
   // Old screenshot presets stored large canvas-space dimensions.
   // When those records are read back into the new mm-based procedural model,
@@ -164,11 +290,55 @@ export function resolveProceduralDeviceShape(
       ),
       DEFAULT_PROCEDURAL_DEVICE_SHAPE.edgeSmoothnessMm
     ),
+    islandWidthMm: positiveFiniteNumber(
+      Number(
+        value?.islandWidthMm ??
+          value?.islandWidth ??
+          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandWidthMm
+      ),
+      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandWidthMm
+    ),
+    islandLengthMm: positiveFiniteNumber(
+      Number(
+        value?.islandLengthMm ??
+          value?.islandLength ??
+          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandLengthMm
+      ),
+      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandLengthMm
+    ),
+    islandRadiusMm: nonNegativeFiniteNumber(
+      Number(
+        value?.islandRadiusMm ??
+          value?.islandRadius ??
+          DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandRadiusMm
+      ),
+      DEFAULT_PROCEDURAL_DEVICE_SHAPE.islandRadiusMm
+    ),
   };
 }
 
 export function resolveProceduralCameraMode(value?: unknown): ProceduralCameraMode {
-  return value === 'orthographic' ? 'orthographic' : DEFAULT_PROCEDURAL_CAMERA_MODE;
+  if (value === 'perspective') return 'perspective';
+  if (value === 'orthographic') return 'orthographic';
+  return DEFAULT_PROCEDURAL_CAMERA_MODE;
+}
+
+export function resolveProceduralCameraSettings(
+  value?: Partial<ProceduralCameraSettings> | null
+): ProceduralCameraSettings {
+  return {
+    perspectiveFov: positiveFiniteNumber(
+      Number(value?.perspectiveFov ?? DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov),
+      DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov
+    ),
+    orthographicFrustumHeight: positiveFiniteNumber(
+      Number(
+        value?.orthographicFrustumHeight ??
+          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight
+      ),
+      DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight
+    ),
+  };
 }
 
 export function resolveIosHeroPhonePose(
@@ -201,6 +371,9 @@ export function resolveIosHeroPhoneShape(
       thickness?: number | null;
       edgeRadius?: number | null;
       edgeSmoothness?: number | null;
+      islandWidth?: number | null;
+      islandLength?: number | null;
+      islandRadius?: number | null;
     }
   ) | null
 ): IosHeroPhoneShape {
@@ -226,4 +399,18 @@ function normalizeDegrees360(value: number): number {
   if (!Number.isFinite(value)) return 0;
   const normalized = value % 360;
   return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function normalizeHexColor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : fallback;
+}
+
+function degToRad(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function radToDeg(value: number): number {
+  return (value * 180) / Math.PI;
 }

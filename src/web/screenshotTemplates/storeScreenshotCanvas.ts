@@ -12,7 +12,6 @@ import {
 } from './iosHeroDeviceAsset.js';
 import {
   DEFAULT_IOS_HERO_PHONE_POSE,
-  DEFAULT_IOS_HERO_PHONE_SHAPE,
   resolveIosHeroPhonePose,
   resolveIosHeroPhoneShape,
   type IosHeroPhonePose,
@@ -23,6 +22,12 @@ import {
   type ScreenshotTitleTypography,
 } from './screenshotTitleTypography.js';
 import { resolveScreenshotTitleLineColors } from './screenshotTitleColors.js';
+import {
+  SLOT_1_SBE_ORIGIN,
+  SLOT_1_SBE_PATH_D,
+  resolveSlot1SbeSettings,
+  type Slot1SbeSettings,
+} from './slot1Sbe.js';
 import type { ScreenshotStore } from './screenshotStores.js';
 
 export type ScreenshotCanvasImageSource = string | Uint8Array | null | undefined;
@@ -32,6 +37,7 @@ export type ScreenshotCanvasImageLoader = (
 
 export const IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER = 2;
 export const IOS_HERO_SLOT_2_SCENE_OFFSET_Y = 0;
+export const IOS_HERO_SPLIT_SEAM_GAP_PX = 80;
 
 export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
@@ -45,6 +51,7 @@ export type StoreScreenshotCanvasInput = {
   iosHeroOverlaySource?: string | null;
   heroPhonePose?: Partial<IosHeroPhonePose> | null;
   heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
+  slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
 };
 
 const FONT_STACK =
@@ -92,6 +99,7 @@ export async function drawStoreScreenshotToContext(
       iosHeroOverlayImage,
       heroPhonePose: input.heroPhonePose,
       heroPhoneShape: input.heroPhoneShape,
+      slot1SbeSettings: input.slot1SbeSettings,
       width: canvasSize.width,
       height: canvasSize.height,
     });
@@ -129,6 +137,7 @@ function drawIosFrame(
     iosHeroOverlayImage: any;
     heroPhonePose?: Partial<IosHeroPhonePose> | null;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
+    slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
     height: number;
   }
@@ -154,6 +163,7 @@ function drawIosSplitHero(
     iosHeroOverlayImage: any;
     heroPhonePose?: Partial<IosHeroPhonePose> | null;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
+    slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
     height: number;
   }
@@ -163,12 +173,16 @@ function drawIosSplitHero(
     titleLines: input.titleLines,
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
+    titleLineGap: input.titleLineGap,
     palette: input.palette,
+    slot1SbeSettings: input.slot1SbeSettings,
     width: input.width,
     height: input.height,
   });
 
-  const sceneOffsetX = input.slot === 1 ? 0 : input.width;
+  const sceneWidth =
+    input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER + IOS_HERO_SPLIT_SEAM_GAP_PX;
+  const sceneOffsetX = input.slot === 1 ? 0 : input.width + IOS_HERO_SPLIT_SEAM_GAP_PX;
   const sceneOffsetY = input.slot === 2 ? IOS_HERO_SLOT_2_SCENE_OFFSET_Y : 0;
 
   ctx.save();
@@ -179,7 +193,7 @@ function drawIosSplitHero(
 
   drawIosSplitHeroSharedDecor(ctx, {
     palette: input.palette,
-    sceneWidth: input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER,
+    sceneWidth,
     height: input.height,
   });
 
@@ -202,6 +216,7 @@ export function drawIosSplitHeroBackdrop(
     titleLineColors: string[];
     titleLineGap?: number | null;
     palette: ScreenshotTemplatePalette;
+    slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
     height: number;
   }
@@ -212,6 +227,10 @@ export function drawIosSplitHeroBackdrop(
   background.addColorStop(1, '#efe9e2');
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
+
+  if (input.slot === 1) {
+    drawSlot1SbeEffect(ctx, input.slot1SbeSettings);
+  }
 
   drawTitleBlock(ctx, {
     x: 88,
@@ -231,40 +250,39 @@ export function drawIosSplitHeroBackdrop(
 
 export function drawIosSplitHeroSharedDecor(
   ctx: any,
-  input: {
+  _input: {
     palette: ScreenshotTemplatePalette;
     sceneWidth: number;
     height: number;
   }
 ): void {
-  const { palette, sceneWidth, height } = input;
-  drawSoftWaveSet(ctx, {
-    x: 316,
-    y: height - 156,
-    loops: 28,
-    stroke: rgba(hexToRgb(palette.accent), 0.14),
-    rotation: -0.38,
-    stepX: 16,
-    stepY: 12,
-    radiusX: 94,
-    radiusY: 134,
-  });
-
-  drawSoftWaveSet(ctx, {
-    x: sceneWidth - 314,
-    y: height - 772,
-    loops: 24,
-    stroke: rgba(hexToRgb(palette.accent), 0.12),
-    rotation: 0.52,
-    stepX: 18,
-    stepY: 14,
-    radiusX: 104,
-    radiusY: 140,
-  });
-
-  drawSoftCircle(ctx, 1768, 2078, 128, rgba(hexToRgb(palette.accent), 0.08));
-  drawSoftCircle(ctx, 194, 1900, 88, rgba(hexToRgb(palette.bgInk), 0.03));
   drawSoftShadow(ctx, 1268, 1940, 450, 0.18);
+}
+
+function drawSlot1SbeEffect(ctx: any, input?: Partial<Slot1SbeSettings> | null): void {
+  const settings = resolveSlot1SbeSettings(input);
+  if (typeof Path2D === 'undefined') return;
+
+  const curvePath = new Path2D(SLOT_1_SBE_PATH_D);
+
+  ctx.save();
+  ctx.strokeStyle = settings.lineColor;
+  ctx.lineWidth = settings.lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = settings.opacity;
+
+  for (let copyIndex = 0; copyIndex < settings.copyCount; copyIndex += 1) {
+    ctx.save();
+    ctx.translate(settings.positionX, settings.positionY);
+    ctx.rotate((settings.angleDeg * copyIndex * Math.PI) / 180);
+    ctx.scale(settings.scale, settings.scale);
+    ctx.translate(-settings.originX, -settings.originY);
+    ctx.stroke(curvePath);
+    ctx.restore();
+  }
+
+  ctx.restore();
 }
 
 function drawIosPoster(
@@ -277,19 +295,27 @@ function drawIosPoster(
     titleLineGap?: number | null;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
+    heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
     width: number;
     height: number;
   }
 ): void {
   drawIosPosterBackdrop(ctx, input);
 
+  const phoneWidth = 992;
+  const phoneInset = 22;
+  const screenWidth = phoneWidth - phoneInset * 2;
+  const screenHeight = Math.round(screenWidth * (input.height / input.width));
+  const phoneHeight = screenHeight + phoneInset * 2;
+
   drawPosterPhone(ctx, {
     x: 146,
     y: 930,
-    width: 992,
-    height: 1988,
+    width: phoneWidth,
+    height: phoneHeight,
     palette: input.palette,
     screenshotImage: input.screenshotImage,
+    heroPhoneShape: input.heroPhoneShape,
   });
 }
 
@@ -306,23 +332,9 @@ export function drawIosPosterBackdrop(
     height: number;
   }
 ): void {
-  const { palette, width, height, slot } = input;
+  const { palette, width, height } = input;
   ctx.fillStyle = palette.accent;
   ctx.fillRect(0, 0, width, height);
-
-  if (slot === 4) {
-    drawContourWave(ctx, width - 250, 470, 18, rgba(hexToRgb(palette.cream), 0.22), 0.95);
-  }
-  if (slot === 6) {
-    drawContourWave(ctx, 70, 600, 18, rgba(hexToRgb(palette.cream), 0.22), 1.05);
-  }
-
-  if (slot === 3 || slot === 5) {
-    drawSoftCircle(ctx, 76, 126, 76, rgba(hexToRgb(palette.cream), 0.24));
-  }
-  if (slot === 6) {
-    drawSoftCircle(ctx, 62, 1570, 64, rgba(hexToRgb(palette.cream), 0.18));
-  }
 
   drawTitleBlock(ctx, {
     x: 88,
@@ -364,10 +376,6 @@ function drawPlayStoreFrame(
   gradient.addColorStop(1, rgba(hexToRgb(ink), 0.28));
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
-
-  drawContourWave(ctx, width - 180, 330, 14, rgba(hexToRgb(palette.muted), 0.14), 0.72);
-  drawSoftCircle(ctx, 108, 170, 86, rgba(hexToRgb(palette.accent), 0.22));
-  drawSoftCircle(ctx, width - 84, height - 310, 96, rgba(hexToRgb(palette.accent), 0.16));
 
   drawTitleBlock(ctx, {
     x: 76,
@@ -450,15 +458,18 @@ function drawPosterPhone(
     height: number;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
+    heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
   }
 ): void {
   const { x, y, width, height, palette, screenshotImage } = input;
+  const resolvedShape = resolveIosHeroPhoneShape(input.heroPhoneShape);
   drawSoftShadow(ctx, x + width / 2, y + height / 2 + 50, width * 0.55, 0.12);
 
+  const phoneRgb = hexToRgb(palette.phoneColor || '#000000');
   const shellGradient = ctx.createLinearGradient(x, y, x + width, y + height);
-  shellGradient.addColorStop(0, '#5b646f');
-  shellGradient.addColorStop(0.5, '#3c4148');
-  shellGradient.addColorStop(1, '#2c3138');
+  shellGradient.addColorStop(0, rgba({ r: Math.min(255, phoneRgb.r + 40), g: Math.min(255, phoneRgb.g + 40), b: Math.min(255, phoneRgb.b + 40) }, 1));
+  shellGradient.addColorStop(0.5, rgba({ r: Math.min(255, phoneRgb.r + 15), g: Math.min(255, phoneRgb.g + 15), b: Math.min(255, phoneRgb.b + 15) }, 1));
+  shellGradient.addColorStop(1, rgba(phoneRgb, 1));
   fillRoundedRect(ctx, x, y, width, height, 118, shellGradient);
 
   strokeRoundedRect(ctx, x, y, width, height, 118, 'rgba(255,255,255,0.16)', 2);
@@ -482,9 +493,6 @@ function drawPosterPhone(
   const screenY = y + 22;
   const screenWidth = width - 44;
   const screenHeight = height - 44;
-  fillRoundedRect(ctx, screenX, screenY, screenWidth, screenHeight, 88, palette.cream);
-
-  fillRoundedRect(ctx, x + width / 2 - 112, y + 14, 224, 34, 17, '#06080b');
   drawDeviceScreen(ctx, {
     x: screenX,
     y: screenY,
@@ -496,6 +504,22 @@ function drawPosterPhone(
     placeholderColor: '#6b6b6d',
     placeholderSubColor: '#8a8a8d',
   });
+
+  const screenWidthMm = Math.max(1, resolvedShape.widthMm - 4);
+  const screenLengthMm = Math.max(1, resolvedShape.lengthMm - 4);
+  const islandWidth = Math.max(1, Math.min(screenWidth, screenWidth * (resolvedShape.islandWidthMm / screenWidthMm)));
+  const islandLength = Math.max(1, Math.min(screenHeight, screenHeight * (resolvedShape.islandLengthMm / screenLengthMm)));
+  const islandRadius = Math.max(
+    0,
+    Math.min(
+      islandWidth / 2,
+      islandLength / 2,
+      screenWidth * (resolvedShape.islandRadiusMm / screenWidthMm)
+    )
+  );
+  const islandX = screenX + (screenWidth - islandWidth) / 2;
+  const islandY = screenY + islandLength * 0.3;
+  fillRoundedRect(ctx, islandX, islandY, islandWidth, islandLength, islandRadius, '#06080b');
 }
 
 function drawAndroidPosterPhone(
@@ -630,52 +654,6 @@ function drawTitleBlock(
       (input.accentFirstLine && index === 0 && input.accentColor ? input.accentColor : input.color);
     ctx.fillText(line, input.x, input.y + index * (input.lineHeight + (input.lineGap ?? 0)));
   }
-}
-
-function drawContourWave(
-  ctx: any,
-  centerX: number,
-  centerY: number,
-  loops: number,
-  stroke: string,
-  yScale: number
-): void {
-  ctx.save();
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 2;
-  for (let index = 0; index < loops; index += 1) {
-    ctx.beginPath();
-    ctx.ellipse(centerX, centerY, 90 + index * 24, (54 + index * 17) * yScale, 0.18, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawSoftWaveSet(
-  ctx: any,
-  input: {
-    x: number;
-    y: number;
-    loops: number;
-    stroke: string;
-    rotation: number;
-    stepX: number;
-    stepY: number;
-    radiusX: number;
-    radiusY: number;
-  }
-): void {
-  ctx.save();
-  ctx.translate(input.x, input.y);
-  ctx.rotate(input.rotation);
-  ctx.strokeStyle = input.stroke;
-  ctx.lineWidth = 2;
-  for (let index = 0; index < input.loops; index += 1) {
-    ctx.beginPath();
-    ctx.ellipse(0, 0, input.radiusX + index * input.stepX, input.radiusY + index * input.stepY, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 function drawSoftCircle(ctx: any, x: number, y: number, radius: number, fill: string): void {
@@ -995,31 +973,6 @@ function rgba(rgb: { r: number; g: number; b: number }, alpha: number): string {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
-function darkenColor(hex: string, amount: number): string {
-  const rgb = hexToRgb(hex);
-  return rgbToHex({
-    r: Math.max(0, Math.round(rgb.r * (1 - amount))),
-    g: Math.max(0, Math.round(rgb.g * (1 - amount))),
-    b: Math.max(0, Math.round(rgb.b * (1 - amount))),
-  });
-}
-
-function lightenColor(hex: string, amount: number): string {
-  const rgb = hexToRgb(hex);
-  return rgbToHex({
-    r: Math.min(255, Math.round(rgb.r + (255 - rgb.r) * amount)),
-    g: Math.min(255, Math.round(rgb.g + (255 - rgb.g) * amount)),
-    b: Math.min(255, Math.round(rgb.b + (255 - rgb.b) * amount)),
-  });
-}
-
-function rgbToHex(rgb: { r: number; g: number; b: number }): string {
-  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
-}
-
-function toHex(value: number): string {
-  return value.toString(16).padStart(2, '0');
-}
 
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;

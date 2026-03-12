@@ -1,18 +1,25 @@
 import * as THREE from 'three';
 import {
+  DEFAULT_PROCEDURAL_CAMERA_MODE,
+  DEFAULT_PROCEDURAL_CAMERA_SETTINGS,
   DEFAULT_PROCEDURAL_DEVICE_LOCATION,
   getDefaultCameraModeForSlot,
   resolveProceduralCameraMode,
+  resolveProceduralCameraSettings,
   resolveProceduralDeviceLocation,
   resolveProceduralDeviceRotation,
   resolveProceduralDeviceShape,
   type IosHeroPhonePose,
   type IosHeroPhoneShape,
   type ProceduralCameraMode,
+  type ProceduralCameraSettings,
   type ProceduralDeviceLocation,
+  type ProceduralKeyLightSettings,
+  type ProceduralLightPosition,
 } from '../../screenshotTemplates/proceduralDeviceConfig';
 import {
   drawIosPosterBackdrop,
+  IOS_HERO_SPLIT_SEAM_GAP_PX,
   IOS_HERO_SLOT_2_SCENE_OFFSET_Y,
   IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER,
   buildTitleLines,
@@ -20,6 +27,10 @@ import {
   drawIosSplitHeroSharedDecor,
   type ScreenshotCanvasImageLoader,
 } from '../../screenshotTemplates/storeScreenshotCanvas';
+import {
+  resolveSlot1SbeSettings,
+  type Slot1SbeSettings,
+} from '../../screenshotTemplates/slot1Sbe';
 import {
   resolveScreenshotTitleTypography,
   type ScreenshotTitleTypography,
@@ -29,6 +40,7 @@ import type {
   ScreenshotTemplatePalette,
 } from '../../screenshotTemplates/storeScreenshotTemplateRegistry';
 import {
+  applyProceduralKeyLight,
   applyProceduralDeviceTransform,
   configureProceduralOrthographicCamera,
   configureProceduralPerspectiveCamera,
@@ -53,7 +65,11 @@ type RenderInput = {
   heroPhonePose?: Partial<IosHeroPhonePose> | null;
   heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
   heroPhoneLocation?: Partial<ProceduralDeviceLocation> | null;
+  heroKeyLightPosition?: Partial<ProceduralLightPosition> | null;
+  heroKeyLightSettings?: Partial<ProceduralKeyLightSettings> | null;
+  slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
   heroCameraMode?: ProceduralCameraMode | null;
+  heroCameraSettings?: Partial<ProceduralCameraSettings> | null;
   width: number;
   height: number;
   targetCanvas?: HTMLCanvasElement;
@@ -67,15 +83,20 @@ type HeroRuntime = {
   perspectiveCamera: THREE.PerspectiveCamera;
   orthographicCamera: THREE.OrthographicCamera;
   deviceGroup: THREE.Group;
+  keyLight: THREE.DirectionalLight;
   screenshotUrl: string | null;
   shapeKey: string | null;
+  profileKey: string | null;
 };
 
 const HERO_RUNTIME_BY_KEY = new WeakMap<object, HeroRuntime>();
-const HERO_PROFILE = {
-  bodyColor: '#3c4148',
-};
-const POSTER_PROFILE = HERO_PROFILE;
+const DEFAULT_PHONE_COLOR = '#000000';
+
+function getDeviceProfile(palette?: ScreenshotTemplatePalette | null) {
+  return {
+    bodyColor: palette?.phoneColor || DEFAULT_PHONE_COLOR,
+  };
+}
 const HERO_BASE_LOCATION = {
   ...DEFAULT_PROCEDURAL_DEVICE_LOCATION,
   z: -34,
@@ -122,12 +143,14 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
     titleLineColors,
     titleLineGap: input.titleLineGap,
     palette: input.palette,
+    slot1SbeSettings: input.slot === 1 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
     width: input.width,
     height: input.height,
   });
 
-  const sceneWidth = input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER;
-  const sceneOffsetX = input.slot === 1 ? 0 : input.width;
+  const sceneWidth =
+    input.width * IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER + IOS_HERO_SPLIT_SEAM_GAP_PX;
+  const sceneOffsetX = input.slot === 1 ? 0 : input.width + IOS_HERO_SPLIT_SEAM_GAP_PX;
   const sceneOffsetY = input.slot === 2 ? IOS_HERO_SLOT_2_SCENE_OFFSET_Y : 0;
 
   finalCtx.save();
@@ -143,6 +166,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
   });
 
   const cameraModeFallback = getDefaultCameraModeForSlot(input.slot);
+  const deviceProfile = getDeviceProfile(input.palette);
   const sceneCanvas = input.previewRuntimeKey
     ? await renderHeroSceneWithRuntime(input.previewRuntimeKey, {
         sceneWidth,
@@ -152,7 +176,11 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
         heroPhonePose: input.heroPhonePose,
         heroPhoneShape: input.heroPhoneShape,
         heroPhoneLocation: input.heroPhoneLocation,
+        heroKeyLightPosition: input.heroKeyLightPosition,
+        heroKeyLightSettings: input.heroKeyLightSettings,
         heroCameraMode: input.heroCameraMode ?? cameraModeFallback,
+        heroCameraSettings: input.heroCameraSettings,
+        deviceProfile,
       })
     : await renderHeroSceneOneShot({
         sceneWidth,
@@ -162,7 +190,11 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
         heroPhonePose: input.heroPhonePose,
         heroPhoneShape: input.heroPhoneShape,
         heroPhoneLocation: input.heroPhoneLocation,
+        heroKeyLightPosition: input.heroKeyLightPosition,
+        heroKeyLightSettings: input.heroKeyLightSettings,
         heroCameraMode: input.heroCameraMode ?? cameraModeFallback,
+        heroCameraSettings: input.heroCameraSettings,
+        deviceProfile,
       });
   finalCtx.drawImage(sceneCanvas, 0, 0, sceneWidth, input.height);
   finalCtx.restore();
@@ -219,7 +251,7 @@ export async function renderIosProceduralPosterComposite(input: {
     rotation: POSTER_DEVICE_ROTATION,
     location: POSTER_DEVICE_LOCATION,
     cameraMode: 'orthographic',
-    profile: POSTER_PROFILE,
+    profile: getDeviceProfile(input.palette),
   });
 
   finalCtx.drawImage(
@@ -252,7 +284,11 @@ async function renderHeroSceneOneShot(input: {
   heroPhonePose?: Partial<IosHeroPhonePose> | null;
   heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
   heroPhoneLocation?: Partial<ProceduralDeviceLocation> | null;
+  heroKeyLightPosition?: Partial<ProceduralLightPosition> | null;
+  heroKeyLightSettings?: Partial<ProceduralKeyLightSettings> | null;
   heroCameraMode?: ProceduralCameraMode | null;
+  heroCameraSettings?: Partial<ProceduralCameraSettings> | null;
+  deviceProfile?: Record<string, string>;
 }): Promise<HTMLCanvasElement> {
   const sceneCanvas = document.createElement('canvas');
   sceneCanvas.width = input.sceneWidth;
@@ -270,12 +306,26 @@ async function renderHeroSceneOneShot(input: {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  createDefaultProceduralLights(scene);
+  createDefaultProceduralLights(scene, {
+    keyLightPosition: input.heroKeyLightPosition,
+    keyLightSettings: input.heroKeyLightSettings,
+  });
 
   const perspectiveCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 5000);
   const orthographicCamera = new THREE.OrthographicCamera(-240, 240, 240, -240, 0.1, 5000);
-  configureProceduralPerspectiveCamera(perspectiveCamera, input.sceneWidth, input.height);
-  configureProceduralOrthographicCamera(orthographicCamera, input.sceneWidth, input.height, 220);
+  const cameraSettings = resolveProceduralCameraSettings(input.heroCameraSettings);
+  configureProceduralPerspectiveCamera(
+    perspectiveCamera,
+    input.sceneWidth,
+    input.height,
+    cameraSettings.perspectiveFov
+  );
+  configureProceduralOrthographicCamera(
+    orthographicCamera,
+    input.sceneWidth,
+    input.height,
+    cameraSettings.orthographicFrustumHeight
+  );
 
   const resolvedShape = resolveProceduralDeviceShape(input.heroPhoneShape);
   const screenMetrics = getProceduralDeviceScreenMetrics(resolvedShape);
@@ -288,7 +338,7 @@ async function renderHeroSceneOneShot(input: {
     shape: resolvedShape,
     rotation: resolveProceduralDeviceRotation(input.heroPhonePose),
     location: getResolvedDeviceLocation(input.heroPhoneLocation),
-    profile: HERO_PROFILE,
+    profile: input.deviceProfile,
     screenshotTexture,
     includeScreen: true,
   });
@@ -297,7 +347,7 @@ async function renderHeroSceneOneShot(input: {
   renderer.render(
     scene,
     getProceduralActiveCamera(
-      resolveProceduralCameraMode(input.heroCameraMode ?? 'perspective'),
+      resolveProceduralCameraMode(input.heroCameraMode ?? DEFAULT_PROCEDURAL_CAMERA_MODE),
       perspectiveCamera,
       orthographicCamera
     )
@@ -318,7 +368,11 @@ async function renderHeroSceneWithRuntime(
     heroPhonePose?: Partial<IosHeroPhonePose> | null;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
     heroPhoneLocation?: Partial<ProceduralDeviceLocation> | null;
-    heroCameraMode?: ProceduralCameraMode | null;
+  heroKeyLightPosition?: Partial<ProceduralLightPosition> | null;
+  heroKeyLightSettings?: Partial<ProceduralKeyLightSettings> | null;
+  heroCameraMode?: ProceduralCameraMode | null;
+  heroCameraSettings?: Partial<ProceduralCameraSettings> | null;
+  deviceProfile?: Record<string, string>;
   }
 ): Promise<HTMLCanvasElement> {
   let runtime = HERO_RUNTIME_BY_KEY.get(runtimeKey);
@@ -330,12 +384,29 @@ async function renderHeroSceneWithRuntime(
     HERO_RUNTIME_BY_KEY.set(runtimeKey, runtime);
   }
 
-  configureProceduralPerspectiveCamera(runtime.perspectiveCamera, input.sceneWidth, input.height);
-  configureProceduralOrthographicCamera(runtime.orthographicCamera, input.sceneWidth, input.height, 220);
+  const cameraSettings = resolveProceduralCameraSettings(input.heroCameraSettings);
+  configureProceduralPerspectiveCamera(
+    runtime.perspectiveCamera,
+    input.sceneWidth,
+    input.height,
+    cameraSettings.perspectiveFov
+  );
+  configureProceduralOrthographicCamera(
+    runtime.orthographicCamera,
+    input.sceneWidth,
+    input.height,
+    cameraSettings.orthographicFrustumHeight
+  );
+
+  applyProceduralKeyLight(runtime.keyLight, {
+    keyLightPosition: input.heroKeyLightPosition,
+    keyLightSettings: input.heroKeyLightSettings,
+  });
 
   const nextShape = resolveProceduralDeviceShape(input.heroPhoneShape);
   const nextShapeKey = JSON.stringify(nextShape);
-  if (runtime.shapeKey !== nextShapeKey || runtime.screenshotUrl !== input.screenshotUrl) {
+  const nextProfileKey = JSON.stringify(input.deviceProfile);
+  if (runtime.shapeKey !== nextShapeKey || runtime.screenshotUrl !== input.screenshotUrl || runtime.profileKey !== nextProfileKey) {
     const screenMetrics = getProceduralDeviceScreenMetrics(nextShape);
     const screenshotTexture = await createProceduralScreenshotTexture(
       input.screenshotUrl,
@@ -344,12 +415,13 @@ async function renderHeroSceneWithRuntime(
     );
     rebuildProceduralDeviceGroup(runtime.deviceGroup, {
       shape: nextShape,
-      profile: HERO_PROFILE,
+      profile: input.deviceProfile,
       screenshotTexture,
       includeScreen: true,
     });
     runtime.shapeKey = nextShapeKey;
     runtime.screenshotUrl = input.screenshotUrl;
+    runtime.profileKey = nextProfileKey;
   }
 
   applyProceduralDeviceTransform(
@@ -361,7 +433,7 @@ async function renderHeroSceneWithRuntime(
   runtime.renderer.render(
     runtime.scene,
     getProceduralActiveCamera(
-      resolveProceduralCameraMode(input.heroCameraMode ?? 'perspective'),
+      resolveProceduralCameraMode(input.heroCameraMode ?? DEFAULT_PROCEDURAL_CAMERA_MODE),
       runtime.perspectiveCamera,
       runtime.orthographicCamera
     )
@@ -387,12 +459,11 @@ function createHeroRuntime(sceneWidth: number, height: number): HeroRuntime {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  createDefaultProceduralLights(scene);
+  const lights = createDefaultProceduralLights(scene);
 
   const perspectiveCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 5000);
   const orthographicCamera = new THREE.OrthographicCamera(-240, 240, 240, -240, 0.1, 5000);
   const deviceGroup = createProceduralDeviceGroup({
-    profile: HERO_PROFILE,
     includeScreen: true,
   });
   scene.add(deviceGroup);
@@ -404,8 +475,10 @@ function createHeroRuntime(sceneWidth: number, height: number): HeroRuntime {
     perspectiveCamera,
     orthographicCamera,
     deviceGroup,
+    keyLight: lights.keyLight,
     screenshotUrl: null,
     shapeKey: null,
+    profileKey: null,
   };
 }
 

@@ -15,21 +15,21 @@ export type ScreenshotSlotTitleTypographyMap = Record<ScreenshotTemplateSlot, Sc
 export const DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY = 'Archivo';
 
 const DEFAULT_IOS_TITLE_TYPOGRAPHY: ScreenshotSlotTitleTypographyMap = {
-  1: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 86, fontWeight: 815 },
-  2: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 720 },
-  3: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 82, fontWeight: 790 },
-  4: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 82, fontWeight: 790 },
-  5: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 82, fontWeight: 790 },
-  6: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 82, fontWeight: 790 },
+  1: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  2: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  3: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  4: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  5: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  6: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
 };
 
 const DEFAULT_PLAY_STORE_TITLE_TYPOGRAPHY: ScreenshotSlotTitleTypographyMap = {
-  1: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
-  2: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
-  3: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
-  4: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
-  5: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
-  6: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 68, fontWeight: 780 },
+  1: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  2: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  3: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  4: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  5: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
+  6: { fontFamily: DEFAULT_SCREENSHOT_TITLE_FONT_FAMILY, fontSize: 120, fontWeight: 500 },
 };
 
 export function getDefaultScreenshotTitleTypography(

@@ -9,6 +9,9 @@ import type { SyncJobRunner } from "./jobRunner.js";
 import type { StoreApiService } from "./storeService.js";
 import type { StoreId } from "./storeRules.js";
 import {
+  resolveProceduralCameraSettings,
+  resolveProceduralKeyLightSettings,
+  resolveProceduralLightPosition,
   resolveProceduralCameraMode,
   resolveProceduralDeviceLocation,
   resolveIosHeroPhoneShape,
@@ -16,8 +19,15 @@ import {
   resolveIosHeroPhonePose,
   type IosHeroPhonePose,
   type ProceduralCameraMode,
+  type ProceduralCameraSettings,
   type ProceduralDeviceLocation,
+  type ProceduralKeyLightSettings,
+  type ProceduralLightPosition,
 } from "./screenshotTemplates/proceduralDeviceConfig.js";
+import {
+  resolveSlot1SbeSettings,
+  type Slot1SbeSettings,
+} from "./screenshotTemplates/slot1Sbe.js";
 import {
   SCREENSHOT_TEMPLATE_SLOTS,
   resolveScreenshotTemplatePalette,
@@ -394,6 +404,9 @@ export function parseScreenshotHeroPhoneShapeInput(
     lengthMm: toOptionalNumber(raw.lengthMm),
     thicknessMm: toOptionalNumber(raw.thicknessMm),
     edgeSmoothnessMm: toOptionalNumber(raw.edgeSmoothnessMm),
+    islandWidthMm: toOptionalNumber(raw.islandWidthMm),
+    islandLengthMm: toOptionalNumber(raw.islandLengthMm),
+    islandRadiusMm: toOptionalNumber(raw.islandRadiusMm),
     width: toOptionalNumber(raw.width),
     height: toOptionalNumber(raw.height),
     length: toOptionalNumber(raw.length),
@@ -401,6 +414,9 @@ export function parseScreenshotHeroPhoneShapeInput(
     thickness: toOptionalNumber(raw.thickness),
     edgeRadius: toOptionalNumber(raw.edgeRadius),
     edgeSmoothness: toOptionalNumber(raw.edgeSmoothness),
+    islandWidth: toOptionalNumber(raw.islandWidth),
+    islandLength: toOptionalNumber(raw.islandLength),
+    islandRadius: toOptionalNumber(raw.islandRadius),
   });
 }
 
@@ -421,12 +437,94 @@ export function parseScreenshotHeroPhoneLocationInput(
   });
 }
 
+export function parseScreenshotHeroKeyLightPositionInput(
+  store: ScreenshotStore,
+  value: unknown
+): ProceduralLightPosition | null {
+  if (store !== "ios") return null;
+  if (!value || typeof value !== "object") {
+    return resolveProceduralLightPosition();
+  }
+
+  const raw = value as Record<string, unknown>;
+  return resolveProceduralLightPosition({
+    x: toOptionalNumber(raw.x),
+    y: toOptionalNumber(raw.y),
+    z: toOptionalNumber(raw.z),
+  });
+}
+
+export function parseScreenshotHeroKeyLightSettingsInput(
+  store: ScreenshotStore,
+  value: unknown,
+  fallbackPosition?: unknown
+): ProceduralKeyLightSettings | null {
+  if (store !== "ios") return null;
+  const resolvedFallbackPosition = parseScreenshotHeroKeyLightPositionInput(store, fallbackPosition);
+  if (!value || typeof value !== "object") {
+    return resolveProceduralKeyLightSettings(undefined, resolvedFallbackPosition);
+  }
+
+  const raw = value as Record<string, unknown>;
+  return resolveProceduralKeyLightSettings(
+    {
+      azimuthDeg: toOptionalNumber(raw.azimuthDeg),
+      elevationDeg: toOptionalNumber(raw.elevationDeg),
+      distance: toOptionalNumber(raw.distance),
+      intensity: toOptionalNumber(raw.intensity),
+      color: toOptionalString(raw.color),
+    },
+    resolvedFallbackPosition
+  );
+}
+
+export function parseScreenshotSlot1SbeSettingsInput(
+  store: ScreenshotStore,
+  value: unknown
+): Slot1SbeSettings | null {
+  if (store !== "ios") return null;
+  if (!value || typeof value !== "object") {
+    return resolveSlot1SbeSettings();
+  }
+
+  const raw = value as Record<string, unknown>;
+  return resolveSlot1SbeSettings({
+    lineWidth: toOptionalNumber(raw.lineWidth),
+    lineColor: toOptionalString(raw.lineColor),
+    opacity: toOptionalNumber(raw.opacity),
+    scale: toOptionalNumber(raw.scale),
+    angleDeg: toOptionalNumber(raw.angleDeg),
+    copyCount: toOptionalNumber(raw.copyCount),
+    positionX: toOptionalNumber(raw.positionX),
+    positionY: toOptionalNumber(raw.positionY),
+    originX: toOptionalNumber(raw.originX),
+    originY: toOptionalNumber(raw.originY),
+    originZ: toOptionalNumber(raw.originZ),
+  });
+}
+
 export function parseScreenshotHeroCameraModeInput(
   store: ScreenshotStore,
   value: unknown
 ): ProceduralCameraMode | null {
   if (store !== "ios") return null;
   return resolveProceduralCameraMode(value);
+}
+
+export function parseScreenshotHeroCameraSettingsInput(
+  store: ScreenshotStore,
+  value: unknown
+): ProceduralCameraSettings | null {
+  if (store !== "ios") return null;
+  if (!value || typeof value !== "object") {
+    return resolveProceduralCameraSettings();
+  }
+
+  const raw = value as Record<string, unknown>;
+  return resolveProceduralCameraSettings({
+    perspectiveFov: toOptionalNumber(raw.perspectiveFov),
+    orthographicFrustumHeight: toOptionalNumber(raw.orthographicFrustumHeight),
+  });
 }
 
 export function parseStoredScreenshotPalette(
@@ -516,7 +614,11 @@ export function parseStoredScreenshotPresetConfig(
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
+  heroKeyLightPosition: ProceduralLightPosition | null;
+  heroKeyLightSettings: ProceduralKeyLightSettings | null;
+  slot1SbeSettings: Slot1SbeSettings | null;
   heroCameraMode: ProceduralCameraMode | null;
+  heroCameraSettings: ProceduralCameraSettings | null;
 } {
   const defaultPalette = resolveScreenshotTemplatePalette(store);
   if (!value || typeof value !== "object") {
@@ -530,7 +632,11 @@ export function parseStoredScreenshotPresetConfig(
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
       heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, undefined),
       heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
+      heroKeyLightPosition: parseScreenshotHeroKeyLightPositionInput(store, undefined),
+      heroKeyLightSettings: parseScreenshotHeroKeyLightSettingsInput(store, undefined, undefined),
+      slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, undefined),
       heroCameraMode: parseScreenshotHeroCameraModeInput(store, undefined),
+      heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, undefined),
     };
   }
 
@@ -546,7 +652,11 @@ export function parseStoredScreenshotPresetConfig(
     "heroPhonePose" in raw ||
     "heroPhoneShape" in raw ||
     "heroPhoneLocation" in raw ||
-    "heroCameraMode" in raw
+    "heroKeyLightPosition" in raw ||
+    "heroKeyLightSettings" in raw ||
+    "slot1SbeSettings" in raw ||
+    "heroCameraMode" in raw ||
+    "heroCameraSettings" in raw
   ) {
     const palette = parseStoredScreenshotPalette(store, raw.palette);
     return {
@@ -559,7 +669,15 @@ export function parseStoredScreenshotPresetConfig(
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, raw.heroPhonePose),
       heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, raw.heroPhoneShape),
       heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, raw.heroPhoneLocation),
+      heroKeyLightPosition: parseScreenshotHeroKeyLightPositionInput(store, raw.heroKeyLightPosition),
+      heroKeyLightSettings: parseScreenshotHeroKeyLightSettingsInput(
+        store,
+        raw.heroKeyLightSettings,
+        raw.heroKeyLightPosition
+      ),
+      slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, raw.slot1SbeSettings),
       heroCameraMode: parseScreenshotHeroCameraModeInput(store, raw.heroCameraMode),
+      heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, raw.heroCameraSettings),
     };
   }
 
@@ -574,7 +692,11 @@ export function parseStoredScreenshotPresetConfig(
     heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
     heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, undefined),
     heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
+    heroKeyLightPosition: parseScreenshotHeroKeyLightPositionInput(store, undefined),
+    heroKeyLightSettings: parseScreenshotHeroKeyLightSettingsInput(store, undefined, undefined),
+    slot1SbeSettings: parseScreenshotSlot1SbeSettingsInput(store, undefined),
     heroCameraMode: parseScreenshotHeroCameraModeInput(store, undefined),
+    heroCameraSettings: parseScreenshotHeroCameraSettingsInput(store, undefined),
   };
 }
 
@@ -604,7 +726,11 @@ export function serializeScreenshotPresetRecord(record: {
     heroPhonePose: config.heroPhonePose,
     heroPhoneShape: config.heroPhoneShape,
     heroPhoneLocation: config.heroPhoneLocation,
+    heroKeyLightPosition: config.heroKeyLightPosition,
+    heroKeyLightSettings: config.heroKeyLightSettings,
+    slot1SbeSettings: config.slot1SbeSettings,
     heroCameraMode: config.heroCameraMode,
+    heroCameraSettings: config.heroCameraSettings,
     updatedAt: record.updatedAt,
   };
 }

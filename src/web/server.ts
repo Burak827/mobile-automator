@@ -50,6 +50,10 @@ if (WEB_ENABLE_UI && existsSync(publicDir)) {
     res.sendFile(join(publicDir, "sstest.html"));
   });
 
+  app.get(["/closed-bezier-curve", "/closed-bezier-curve/"], (_req, res) => {
+    res.sendFile(join(publicDir, "closed-bezier-curve.html"));
+  });
+
   app.use(express.static(publicDir));
 
   app.use((req, res, next) => {

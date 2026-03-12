@@ -186,6 +186,7 @@ export type ScreenshotPalettePayload = {
   bgInk: string;
   cream: string;
   muted: string;
+  phoneColor: string;
 };
 
 export type ScreenshotSlotPaletteMapPayload = Partial<Record<number, ScreenshotPalettePayload>>;
@@ -211,12 +212,48 @@ export type ScreenshotHeroPhoneShapePayload = {
   lengthMm: number;
   thicknessMm: number;
   edgeSmoothnessMm: number;
+  islandWidthMm: number;
+  islandLengthMm: number;
+  islandRadiusMm: number;
 };
 
 export type ScreenshotHeroPhoneLocationPayload = {
   x: number;
   y: number;
   z: number;
+};
+
+export type ScreenshotHeroLightPositionPayload = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ScreenshotHeroLightSettingsPayload = {
+  azimuthDeg: number;
+  elevationDeg: number;
+  distance: number;
+  intensity: number;
+  color: string;
+};
+
+export type ScreenshotHeroCameraSettingsPayload = {
+  perspectiveFov: number;
+  orthographicFrustumHeight: number;
+};
+
+export type ScreenshotSlot1SbePayload = {
+  lineWidth: number;
+  lineColor: string;
+  opacity: number;
+  scale: number;
+  angleDeg: number;
+  copyCount: number;
+  positionX: number;
+  positionY: number;
+  originX: number;
+  originY: number;
+  originZ: number;
 };
 
 export type ScreenshotRendererPayload = {
@@ -237,7 +274,11 @@ export type ScreenshotGenerateResponse = {
   heroPhonePose?: ScreenshotHeroPhonePosePayload | null;
   heroPhoneShape?: ScreenshotHeroPhoneShapePayload | null;
   heroPhoneLocation?: ScreenshotHeroPhoneLocationPayload | null;
+  heroKeyLightPosition?: ScreenshotHeroLightPositionPayload | null;
+  heroKeyLightSettings?: ScreenshotHeroLightSettingsPayload | null;
+  slot1SbeSettings?: ScreenshotSlot1SbePayload | null;
   heroCameraMode?: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
+  heroCameraSettings?: ScreenshotHeroCameraSettingsPayload | null;
   stagedInputPath: string;
   outputPath: string;
   message: string;
@@ -256,7 +297,11 @@ export type ScreenshotPresetPayload = {
   heroPhonePose: ScreenshotHeroPhonePosePayload | null;
   heroPhoneShape: ScreenshotHeroPhoneShapePayload | null;
   heroPhoneLocation: ScreenshotHeroPhoneLocationPayload | null;
+  heroKeyLightPosition: ScreenshotHeroLightPositionPayload | null;
+  heroKeyLightSettings: ScreenshotHeroLightSettingsPayload | null;
+  slot1SbeSettings: ScreenshotSlot1SbePayload | null;
   heroCameraMode: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
+  heroCameraSettings: ScreenshotHeroCameraSettingsPayload | null;
   updatedAt: string;
 };
 

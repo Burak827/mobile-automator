@@ -1072,6 +1072,7 @@ button:hover {
 
 .screenshots-dialog {
   width: min(1760px, 99vw);
+  height: min(96vh, 1180px);
 }
 
 .generate-dialog::backdrop {
@@ -1232,7 +1233,7 @@ button:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .generate-footer-info {
@@ -1475,10 +1476,15 @@ button:hover {
 }
 
 .screenshots-modal {
-  height: min(96vh, 1180px);
+  height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: 2px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0;
+  overflow: hidden;
+}
+
+.screenshots-modal > .generate-footer {
+  padding-top: 10px;
 }
 
 .screenshot-form-grid {
@@ -1515,12 +1521,14 @@ button:hover {
   grid-template-columns: minmax(0, 1.7fr) minmax(340px, 420px);
   gap: 16px;
   align-items: stretch;
+  overflow: auto;
 }
 
 .screenshots-preview-column,
 .screenshots-sidebar {
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .screenshots-preview-column {
@@ -1573,8 +1581,6 @@ button:hover {
 
 .screenshots-palette-panel,
 .screenshots-thumb-card {
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top left, rgba(243, 130, 25, 0.08), transparent 24%),
     rgba(0, 0, 0, 0.16);
@@ -1601,17 +1607,20 @@ button:hover {
   scroll-snap-type: x proximity;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+  min-height: 0;
 }
 
 .screenshots-thumb-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  padding: 8px;
+  padding: 1px;
+  border-radius: 0px;
   cursor: pointer;
   text-align: left;
-  flex: 0 0 clamp(220px, 19vw, 300px);
-  height: clamp(360px, 66vh, 760px);
+  height: 100%;
+  aspect-ratio: 1284 / 2778;
+  flex: 0 0 auto;
   min-height: 0;
   scroll-snap-align: start;
 }
@@ -1627,6 +1636,8 @@ button:hover {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+  text-align: center;
+  align-self: center;
 }
 
 .screenshots-sidebar {
@@ -1764,6 +1775,17 @@ button:hover {
   accent-color: #f38219;
 }
 
+.screenshots-slider-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px;
+  gap: 10px;
+  align-items: center;
+}
+
+.screenshots-slider-controls input[type="number"] {
+  width: 100%;
+}
+
 .screenshots-shape-grid {
   margin-top: 10px;
   display: grid;
@@ -1784,20 +1806,15 @@ button:hover {
 }
 
 @media (max-width: 1180px) {
-  .screenshots-modal {
-    height: auto;
-    max-height: none;
-  }
-
   .screenshots-editor {
     grid-template-columns: 1fr;
+    overflow-y: auto;
   }
 }
 
 @media (max-width: 760px) {
   .screenshots-thumb-card {
-    flex-basis: clamp(170px, 62vw, 220px);
-    height: clamp(280px, 52vh, 420px);
+    height: 100%;
   }
 
   .screenshot-form-grid {

@@ -14,12 +14,16 @@ import type { RouteRegistrar } from '../serverHelpers.js';
 import {
   mustGetApp,
   parseScreenshotHeroCameraModeInput,
+  parseScreenshotHeroCameraSettingsInput,
+  parseScreenshotHeroKeyLightSettingsInput,
+  parseScreenshotHeroKeyLightPositionInput,
   parseScreenshotHeroPhoneLocationInput,
   parseId,
   parseScreenshotHeroPhonePoseInput,
   parseScreenshotHeroPhoneShapeInput,
   parseScreenshotPaletteInput,
   parseScreenshotSlotPalettesInput,
+  parseScreenshotSlot1SbeSettingsInput,
   parseScreenshotSlotTitleExtraLineColorsInput,
   parseScreenshotSlotTitleLineGapsInput,
   parseScreenshotSlotTitleTypographyInput,
@@ -66,7 +70,18 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
       const heroPhonePose = parseScreenshotHeroPhonePoseInput(store, body.heroPhonePose);
       const heroPhoneShape = parseScreenshotHeroPhoneShapeInput(store, body.heroPhoneShape);
       const heroPhoneLocation = parseScreenshotHeroPhoneLocationInput(store, body.heroPhoneLocation);
+      const heroKeyLightPosition = parseScreenshotHeroKeyLightPositionInput(store, body.heroKeyLightPosition);
+      const heroKeyLightSettings = parseScreenshotHeroKeyLightSettingsInput(
+        store,
+        body.heroKeyLightSettings,
+        body.heroKeyLightPosition
+      );
+      const slot1SbeSettings = parseScreenshotSlot1SbeSettingsInput(store, body.slot1SbeSettings);
       const heroCameraMode = parseScreenshotHeroCameraModeInput(store, body.heroCameraMode);
+      const heroCameraSettings = parseScreenshotHeroCameraSettingsInput(
+        store,
+        body.heroCameraSettings
+      );
       const record = ctx.repo.upsertScreenshotPreset(appId, store, {
         palette,
         slotPalettes,
@@ -77,7 +92,11 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         heroPhonePose,
         heroPhoneShape,
         heroPhoneLocation,
+        heroKeyLightPosition,
+        heroKeyLightSettings,
+        slot1SbeSettings,
         heroCameraMode,
+        heroCameraSettings,
       });
 
       res.json({
@@ -131,7 +150,18 @@ async function handleScreenshotGenerateRequest(
   const heroPhonePose = parseScreenshotHeroPhonePoseInput(store, body.heroPhonePose);
   const heroPhoneShape = parseScreenshotHeroPhoneShapeInput(store, body.heroPhoneShape);
   const heroPhoneLocation = parseScreenshotHeroPhoneLocationInput(store, body.heroPhoneLocation);
+  const heroKeyLightPosition = parseScreenshotHeroKeyLightPositionInput(store, body.heroKeyLightPosition);
+  const heroKeyLightSettings = parseScreenshotHeroKeyLightSettingsInput(
+    store,
+    body.heroKeyLightSettings,
+    body.heroKeyLightPosition
+  );
+  const slot1SbeSettings = parseScreenshotSlot1SbeSettingsInput(store, body.slot1SbeSettings);
   const heroCameraMode = parseScreenshotHeroCameraModeInput(store, body.heroCameraMode);
+  const heroCameraSettings = parseScreenshotHeroCameraSettingsInput(
+    store,
+    body.heroCameraSettings
+  );
   const rendererMode = toNonEmptyString(body.rendererMode);
   const fileName = basename(toNonEmptyString(body.fileName) ?? `slot-${slot}.png`);
   const mimeType = toNonEmptyString(body.mimeType) ?? 'image/png';
@@ -189,7 +219,11 @@ async function handleScreenshotGenerateRequest(
     heroPhonePose,
     heroPhoneShape,
     heroPhoneLocation,
+    heroKeyLightPosition,
+    heroKeyLightSettings,
+    slot1SbeSettings,
     heroCameraMode,
+    heroCameraSettings,
   });
 
   res.status(201).json({
@@ -202,7 +236,11 @@ async function handleScreenshotGenerateRequest(
     heroPhonePose,
     heroPhoneShape,
     heroPhoneLocation,
+    heroKeyLightPosition,
+    heroKeyLightSettings,
+    slot1SbeSettings,
     heroCameraMode,
+    heroCameraSettings,
     stagedInputPath: toProjectRelativePath(stagedInputPath),
     outputPath: toProjectRelativePath(outputPath),
     message: `Screenshot üretildi (${storePathToken}/${locale}/slot-${slot}).`,

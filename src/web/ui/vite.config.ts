@@ -21,6 +21,7 @@ export default defineConfig({
       input: {
         index: resolve(currentDir, "index.html"),
         sstest: resolve(currentDir, "sstest.html"),
+        closedBezierCurve: resolve(currentDir, "closed-bezier-curve.html"),
       },
     },
   },

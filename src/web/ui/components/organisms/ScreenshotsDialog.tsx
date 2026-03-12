@@ -8,17 +8,25 @@ import {
 } from '../../../screenshotTemplates/storeScreenshotCanvas';
 import {
   DEFAULT_PROCEDURAL_CAMERA_MODE,
+  DEFAULT_PROCEDURAL_CAMERA_SETTINGS,
   DEFAULT_PROCEDURAL_DEVICE_SHAPE,
   DEFAULT_IOS_HERO_PHONE_LOCATION,
   DEFAULT_IOS_HERO_PHONE_POSE,
+  proceduralKeyLightPositionFromSettings,
   resolveProceduralCameraMode,
+  resolveProceduralCameraSettings,
   resolveIosHeroPhoneLocation,
   resolveIosHeroPhonePose,
+  resolveProceduralKeyLightSettings,
+  resolveProceduralLightPosition,
   resolveProceduralDeviceShape,
   type IosHeroPhonePose,
   type IosHeroPhoneShape,
   type ProceduralCameraMode,
+  type ProceduralCameraSettings,
   type ProceduralDeviceLocation,
+  type ProceduralKeyLightSettings,
+  type ProceduralLightPosition,
 } from '../../../screenshotTemplates/proceduralDeviceConfig';
 import {
   createDefaultScreenshotTitleTypographyMap,
@@ -29,11 +37,17 @@ import {
 import {
   createEmptyScreenshotTitleExtraLineColorsMap,
   getDefaultScreenshotTitlePrimaryColor,
+  MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS,
   resolveScreenshotTitleLineColors,
   resolveStoredScreenshotTitleExtraLineColorsMap,
   syncScreenshotTitleExtraLineColors,
   type ScreenshotSlotTitleExtraLineColorsMap,
 } from '../../../screenshotTemplates/screenshotTitleColors';
+import {
+  DEFAULT_SLOT_1_SBE_SETTINGS,
+  resolveSlot1SbeSettings,
+  type Slot1SbeSettings,
+} from '../../../screenshotTemplates/slot1Sbe';
 import {
   getScreenshotTemplateCanvasSize,
   getScreenshotTemplateDefaultPalette,
@@ -84,7 +98,11 @@ export type ScreenshotDialogStartPayload = {
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
+  heroKeyLightPosition: ProceduralLightPosition | null;
+  heroKeyLightSettings: ProceduralKeyLightSettings | null;
+  slot1SbeSettings: Slot1SbeSettings | null;
   heroCameraMode: ProceduralCameraMode | null;
+  heroCameraSettings: ProceduralCameraSettings | null;
   renderedSlots: ScreenshotRenderedSlotPayload[];
 };
 
@@ -98,7 +116,11 @@ export type ScreenshotPresetConfig = {
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
+  heroKeyLightPosition: ProceduralLightPosition | null;
+  heroKeyLightSettings: ProceduralKeyLightSettings | null;
+  slot1SbeSettings: Slot1SbeSettings | null;
   heroCameraMode: ProceduralCameraMode | null;
+  heroCameraSettings: ProceduralCameraSettings | null;
 };
 
 export type ScreenshotPresetMap = Partial<Record<ScreenshotStore, ScreenshotPresetConfig>>;
@@ -126,7 +148,11 @@ type PreviewCardProps = {
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
+  heroKeyLightPosition: ProceduralLightPosition | null;
+  heroKeyLightSettings: ProceduralKeyLightSettings | null;
+  slot1SbeSettings: Slot1SbeSettings | null;
   heroCameraMode: ProceduralCameraMode | null;
+  heroCameraSettings: ProceduralCameraSettings | null;
   screenshotUrl: string;
   imageLoader: ScreenshotCanvasImageLoader;
   fontLoadVersion: number;
@@ -135,7 +161,7 @@ type PreviewCardProps = {
   onSelect: (slot: ScreenshotTemplateSlot) => void;
 };
 
-type PanelKey = 'rotation' | 'color' | 'shape' | 'location';
+type PanelKey = 'rotation' | 'color' | 'shape' | 'location' | 'light' | 'sbe';
 type ScreenshotSlotTitleMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPaletteMap = Record<ScreenshotTemplateSlot, ScreenshotTemplatePalette>;
 type ScreenshotSlotTitleLineGapMap = Record<ScreenshotTemplateSlot, number>;
@@ -281,7 +307,11 @@ function mergeScreenshotPresetConfig(
     heroPhonePose: draft.heroPhonePose ?? base.heroPhonePose,
     heroPhoneShape: draft.heroPhoneShape ?? base.heroPhoneShape,
     heroPhoneLocation: draft.heroPhoneLocation ?? base.heroPhoneLocation,
+    heroKeyLightPosition: draft.heroKeyLightPosition ?? base.heroKeyLightPosition,
+    heroKeyLightSettings: draft.heroKeyLightSettings ?? base.heroKeyLightSettings,
+    slot1SbeSettings: draft.slot1SbeSettings ?? base.slot1SbeSettings,
     heroCameraMode: draft.heroCameraMode ?? base.heroCameraMode,
+    heroCameraSettings: draft.heroCameraSettings ?? base.heroCameraSettings,
   };
 }
 
@@ -334,7 +364,11 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
   heroPhonePose,
   heroPhoneShape,
   heroPhoneLocation,
+  heroKeyLightPosition,
+  heroKeyLightSettings,
+  slot1SbeSettings,
   heroCameraMode,
+  heroCameraSettings,
   screenshotUrl,
   imageLoader,
   fontLoadVersion,
@@ -372,7 +406,11 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
         heroPhonePose,
         heroPhoneShape,
         heroPhoneLocation,
+        heroKeyLightPosition,
+        heroKeyLightSettings,
+        slot1SbeSettings,
         heroCameraMode,
+        heroCameraSettings,
         width: previewWidth,
         height: previewHeight,
         previewRuntimeKey: canvas,
@@ -403,7 +441,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
     }
 
     return () => { /* renderIdRef check guards stale renders */ };
-  }, [fontLoadVersion, heroCameraMode, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, store, title, titleExtraLineColors, titleLineGap, titleTypography]);
+  }, [fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleExtraLineColors, titleLineGap, titleTypography]);
 
   return (
     <button
@@ -475,8 +513,24 @@ export default function ScreenshotsDialog({
     ios: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
     play_store: null,
   });
+  const [heroKeyLightPositionByStore, setHeroKeyLightPositionByStore] = useState<Record<ScreenshotStore, ProceduralLightPosition | null>>({
+    ios: resolveProceduralLightPosition(),
+    play_store: null,
+  });
+  const [heroKeyLightSettingsByStore, setHeroKeyLightSettingsByStore] = useState<Record<ScreenshotStore, ProceduralKeyLightSettings | null>>({
+    ios: resolveProceduralKeyLightSettings(),
+    play_store: null,
+  });
+  const [slot1SbeSettingsByStore, setSlot1SbeSettingsByStore] = useState<Record<ScreenshotStore, Slot1SbeSettings | null>>({
+    ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+    play_store: null,
+  });
   const [heroCameraModeByStore, setHeroCameraModeByStore] = useState<Record<ScreenshotStore, ProceduralCameraMode | null>>({
     ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
+    play_store: null,
+  });
+  const [heroCameraSettingsByStore, setHeroCameraSettingsByStore] = useState<Record<ScreenshotStore, ProceduralCameraSettings | null>>({
+    ios: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     play_store: null,
   });
   const [panelState, setPanelState] = useState({
@@ -484,10 +538,13 @@ export default function ScreenshotsDialog({
     color: false,
     shape: false,
     location: false,
+    light: false,
+    sbe: false,
   });
   const latestFileReadRef = useRef(0);
   const wasOpenRef = useRef(false);
   const [fontLoadVersion, setFontLoadVersion] = useState(0);
+  const [isPersistingPreset, setIsPersistingPreset] = useState(false);
   const presetSaveTimeoutsRef = useRef<Record<ScreenshotStore, number | null>>({
     ios: null,
     play_store: null,
@@ -503,7 +560,11 @@ export default function ScreenshotsDialog({
       heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
       heroPhoneShape: resolveProceduralDeviceShape(DEFAULT_PROCEDURAL_DEVICE_SHAPE),
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
+      heroKeyLightPosition: resolveProceduralLightPosition(),
+      heroKeyLightSettings: resolveProceduralKeyLightSettings(),
+      slot1SbeSettings: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
       heroCameraMode: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
+      heroCameraSettings: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }),
     play_store: JSON.stringify({
       palette: getScreenshotTemplateDefaultPalette('play_store'),
@@ -515,7 +576,11 @@ export default function ScreenshotsDialog({
       heroPhonePose: null,
       heroPhoneShape: null,
       heroPhoneLocation: null,
+      heroKeyLightPosition: null,
+      heroKeyLightSettings: null,
+      slot1SbeSettings: null,
       heroCameraMode: null,
+      heroCameraSettings: null,
     }),
   });
   const browserImageLoader = useMemo(() => createBrowserCanvasImageLoader(), []);
@@ -569,8 +634,27 @@ export default function ScreenshotsDialog({
       ios: resolveIosHeroPhoneLocation(initialIosPreset?.heroPhoneLocation),
       play_store: null,
     };
+    const nextHeroKeyLightPosition: Record<ScreenshotStore, ProceduralLightPosition | null> = {
+      ios: resolveProceduralLightPosition(initialIosPreset?.heroKeyLightPosition),
+      play_store: null,
+    };
+    const nextHeroKeyLightSettings: Record<ScreenshotStore, ProceduralKeyLightSettings | null> = {
+      ios: resolveProceduralKeyLightSettings(
+        initialIosPreset?.heroKeyLightSettings,
+        initialIosPreset?.heroKeyLightPosition
+      ),
+      play_store: null,
+    };
+    const nextSlot1SbeSettings: Record<ScreenshotStore, Slot1SbeSettings | null> = {
+      ios: resolveSlot1SbeSettings(initialIosPreset?.slot1SbeSettings),
+      play_store: null,
+    };
     const nextHeroCameraMode: Record<ScreenshotStore, ProceduralCameraMode | null> = {
       ios: resolveProceduralCameraMode(initialIosPreset?.heroCameraMode),
+      play_store: null,
+    };
+    const nextHeroCameraSettings: Record<ScreenshotStore, ProceduralCameraSettings | null> = {
+      ios: resolveProceduralCameraSettings(initialIosPreset?.heroCameraSettings),
       play_store: null,
     };
     setStore(defaultStore);
@@ -587,12 +671,18 @@ export default function ScreenshotsDialog({
     setHeroPhonePoseByStore(nextHeroPhonePose);
     setHeroPhoneShapeByStore(nextHeroPhoneShape);
     setHeroPhoneLocationByStore(nextHeroPhoneLocation);
+    setHeroKeyLightPositionByStore(nextHeroKeyLightPosition);
+    setHeroKeyLightSettingsByStore(nextHeroKeyLightSettings);
+    setSlot1SbeSettingsByStore(nextSlot1SbeSettings);
     setHeroCameraModeByStore(nextHeroCameraMode);
+    setHeroCameraSettingsByStore(nextHeroCameraSettings);
     setPanelState({
       rotation: false,
       color: false,
       shape: false,
       location: false,
+      light: false,
+      sbe: false,
     });
     persistedPresetKeysRef.current = {
       ios: JSON.stringify({
@@ -605,7 +695,11 @@ export default function ScreenshotsDialog({
         heroPhonePose: nextHeroPhonePose.ios,
         heroPhoneShape: nextHeroPhoneShape.ios,
         heroPhoneLocation: nextHeroPhoneLocation.ios,
+        heroKeyLightPosition: nextHeroKeyLightPosition.ios,
+        heroKeyLightSettings: nextHeroKeyLightSettings.ios,
+        slot1SbeSettings: nextSlot1SbeSettings.ios,
         heroCameraMode: nextHeroCameraMode.ios,
+        heroCameraSettings: nextHeroCameraSettings.ios,
       }),
       play_store: JSON.stringify({
         palette: nextSlotPalettes.play_store[1],
@@ -617,7 +711,11 @@ export default function ScreenshotsDialog({
         heroPhonePose: nextHeroPhonePose.play_store,
         heroPhoneShape: nextHeroPhoneShape.play_store,
         heroPhoneLocation: nextHeroPhoneLocation.play_store,
+        heroKeyLightPosition: nextHeroKeyLightPosition.play_store,
+        heroKeyLightSettings: nextHeroKeyLightSettings.play_store,
+        slot1SbeSettings: nextSlot1SbeSettings.play_store,
         heroCameraMode: nextHeroCameraMode.play_store,
+        heroCameraSettings: nextHeroCameraSettings.play_store,
       }),
     };
     setFileInputKey((prev) => prev + 1);
@@ -706,9 +804,34 @@ export default function ScreenshotsDialog({
     () => (store === 'ios' ? resolveIosHeroPhoneLocation(heroPhoneLocationByStore.ios) : null),
     [heroPhoneLocationByStore.ios, store]
   );
+  const resolvedHeroKeyLightPosition = useMemo(
+    () => (store === 'ios' ? resolveProceduralLightPosition(heroKeyLightPositionByStore.ios) : null),
+    [heroKeyLightPositionByStore.ios, store]
+  );
+  const resolvedHeroKeyLightSettings = useMemo(
+    () =>
+      (store === 'ios'
+        ? resolveProceduralKeyLightSettings(
+            heroKeyLightSettingsByStore.ios,
+            heroKeyLightPositionByStore.ios
+          )
+        : null),
+    [heroKeyLightPositionByStore.ios, heroKeyLightSettingsByStore.ios, store]
+  );
+  const resolvedSlot1SbeSettings = useMemo(
+    () => (store === 'ios' ? resolveSlot1SbeSettings(slot1SbeSettingsByStore.ios) : null),
+    [slot1SbeSettingsByStore.ios, store]
+  );
   const resolvedHeroCameraMode = useMemo(
     () => (store === 'ios' ? resolveProceduralCameraMode(heroCameraModeByStore.ios) : null),
     [heroCameraModeByStore.ios, store]
+  );
+  const resolvedHeroCameraSettings = useMemo(
+    () =>
+      store === 'ios'
+        ? resolveProceduralCameraSettings(heroCameraSettingsByStore.ios)
+        : null,
+    [heroCameraSettingsByStore.ios, store]
   );
   const persistedTitleExtraLineColorsForStore = useMemo(
     () => ({
@@ -720,10 +843,26 @@ export default function ScreenshotsDialog({
   const buildPresetStateForStore = useCallback((targetStore: ScreenshotStore) => {
     const slotPalettes = slotPalettesByStore[targetStore];
     const slotTitles = titlesByStore[targetStore];
-    const slotTitleExtraLineColors =
+    const rawSlotTitleExtraLineColors =
       targetStore === store
         ? persistedTitleExtraLineColorsForStore
         : titleExtraLineColorsByStore[targetStore];
+    const slotTitleExtraLineColors = SCREENSHOT_TEMPLATE_SLOTS.reduce((acc, targetSlot) => {
+      const targetPalette = resolveScreenshotTemplatePalette(targetStore, slotPalettes[targetSlot]);
+      const targetTitle = slotTitles[targetSlot] ?? '';
+      const targetLines = buildTitleLines(targetSlot, targetTitle);
+      const targetPrimaryColor = getDefaultScreenshotTitlePrimaryColor(
+        targetStore,
+        targetSlot,
+        targetPalette
+      );
+      acc[targetSlot] = syncScreenshotTitleExtraLineColors(
+        rawSlotTitleExtraLineColors?.[targetSlot],
+        targetLines.length,
+        targetPrimaryColor
+      );
+      return acc;
+    }, {} as ScreenshotSlotTitleExtraLineColorsMap);
     const slotTitleLineGaps = titleLineGapByStore[targetStore];
     const slotTitleTypography = titleTypographyByStore[targetStore];
     const palette = resolveScreenshotTemplatePalette(targetStore, slotPalettes[1]);
@@ -733,8 +872,23 @@ export default function ScreenshotsDialog({
       targetStore === 'ios' ? resolveProceduralDeviceShape(heroPhoneShapeByStore.ios) : null;
     const heroPhoneLocation =
       targetStore === 'ios' ? resolveIosHeroPhoneLocation(heroPhoneLocationByStore.ios) : null;
+    const heroKeyLightPosition =
+      targetStore === 'ios' ? resolveProceduralLightPosition(heroKeyLightPositionByStore.ios) : null;
+    const heroKeyLightSettings =
+      targetStore === 'ios'
+        ? resolveProceduralKeyLightSettings(
+            heroKeyLightSettingsByStore.ios,
+            heroKeyLightPositionByStore.ios
+          )
+        : null;
+    const slot1SbeSettings =
+      targetStore === 'ios' ? resolveSlot1SbeSettings(slot1SbeSettingsByStore.ios) : null;
     const heroCameraMode =
       targetStore === 'ios' ? resolveProceduralCameraMode(heroCameraModeByStore.ios) : null;
+    const heroCameraSettings =
+      targetStore === 'ios'
+        ? resolveProceduralCameraSettings(heroCameraSettingsByStore.ios)
+        : null;
     const preset = {
       palette,
       slotPalettes,
@@ -745,28 +899,33 @@ export default function ScreenshotsDialog({
       heroPhonePose,
       heroPhoneShape,
       heroPhoneLocation,
+      heroKeyLightPosition,
+      heroKeyLightSettings,
+      slot1SbeSettings,
       heroCameraMode,
+      heroCameraSettings,
     };
     return {
       preset,
       key: JSON.stringify(preset),
     };
-  }, [heroCameraModeByStore.ios, heroPhoneLocationByStore.ios, heroPhonePoseByStore.ios, heroPhoneShapeByStore.ios, persistedTitleExtraLineColorsForStore, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [heroCameraModeByStore.ios, heroCameraSettingsByStore.ios, heroKeyLightPositionByStore.ios, heroKeyLightSettingsByStore.ios, heroPhoneLocationByStore.ios, heroPhonePoseByStore.ios, heroPhoneShapeByStore.ios, persistedTitleExtraLineColorsForStore, slot1SbeSettingsByStore.ios, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
   const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
   const isIosHeroSlot = store === 'ios' && slot <= 2;
   const canStart = Boolean(file) && locale.trim().length > 0 && !isLocked;
+  const canSaveSettings = Boolean(appId) && !isLocked && !isPersistingPreset;
 
   const handlePaletteChange = useCallback(
     (key: keyof ScreenshotTemplatePalette, value: string) => {
       setSlotPalettesByStore((prev) => {
         const nextStorePalettes = { ...prev[store] };
-        const targets = getSlotPaletteTargets(store, slot);
-        const basePalette = resolveScreenshotTemplatePalette(store, nextStorePalettes[slot]);
-        const nextPalette = resolveScreenshotTemplatePalette(store, { ...basePalette, [key]: value });
+        // phoneColor is global — propagate to ALL slots
+        const targets = key === 'phoneColor' ? [...SCREENSHOT_TEMPLATE_SLOTS] : getSlotPaletteTargets(store, slot);
         for (const targetSlot of targets) {
-          nextStorePalettes[targetSlot] = nextPalette;
+          const basePalette = resolveScreenshotTemplatePalette(store, nextStorePalettes[targetSlot]);
+          nextStorePalettes[targetSlot] = resolveScreenshotTemplatePalette(store, { ...basePalette, [key]: value });
         }
         return {
           ...prev,
@@ -807,9 +966,12 @@ export default function ScreenshotsDialog({
     (lineIndex: number, value: string) => {
       setTitleExtraLineColorsByStore((prev) => {
         const nextStoreMap = { ...prev[store] };
-        const nextSlotColors = [...(nextStoreMap[slot] ?? [])];
+        const nextSlotColors = [...(nextStoreMap[slot] ?? [])].slice(
+          0,
+          MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS
+        );
         nextSlotColors[lineIndex] = value;
-        nextStoreMap[slot] = nextSlotColors;
+        nextStoreMap[slot] = nextSlotColors.slice(0, MAX_SCREENSHOT_TITLE_EXTRA_LINE_COLORS);
         return {
           ...prev,
           [store]: nextStoreMap,
@@ -818,6 +980,32 @@ export default function ScreenshotsDialog({
     },
     [slot, store]
   );
+
+  const handleSaveCurrentSettings = useCallback(async () => {
+    if (!appId) return;
+
+    const { preset, key } = buildPresetStateForStore(store);
+    writeScreenshotDraft(appId, store, preset);
+
+    const pendingTimeout = presetSaveTimeoutsRef.current[store];
+    if (pendingTimeout) {
+      window.clearTimeout(pendingTimeout);
+      presetSaveTimeoutsRef.current[store] = null;
+    }
+
+    if (!onPresetChange) {
+      persistedPresetKeysRef.current[store] = key;
+      return;
+    }
+
+    setIsPersistingPreset(true);
+    try {
+      await Promise.resolve(onPresetChange(store, preset));
+      persistedPresetKeysRef.current[store] = key;
+    } finally {
+      setIsPersistingPreset(false);
+    }
+  }, [appId, buildPresetStateForStore, onPresetChange, store]);
 
   const handleResetSelectedSlot = useCallback(() => {
     setTitlesByStore((prev) => ({
@@ -876,9 +1064,27 @@ export default function ScreenshotsDialog({
       ...prev,
       ios: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
     }));
+    setHeroKeyLightPositionByStore((prev) => ({
+      ...prev,
+      ios: resolveProceduralLightPosition(),
+    }));
+    setHeroKeyLightSettingsByStore((prev) => ({
+      ...prev,
+      ios: resolveProceduralKeyLightSettings(),
+    }));
+    if (slot === 1) {
+      setSlot1SbeSettingsByStore((prev) => ({
+        ...prev,
+        ios: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+      }));
+    }
     setHeroCameraModeByStore((prev) => ({
       ...prev,
       ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE),
+    }));
+    setHeroCameraSettingsByStore((prev) => ({
+      ...prev,
+      ios: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     }));
   }, [slot, store]);
 
@@ -922,6 +1128,58 @@ export default function ScreenshotsDialog({
     }));
     },
     [store]
+  );
+
+  const handleHeroKeyLightSettingsChange = useCallback(
+    (
+      key: keyof ProceduralKeyLightSettings,
+      value: number | string
+    ) => {
+      if (store !== 'ios') return;
+      setHeroKeyLightSettingsByStore((prev) => {
+        const nextSettings = resolveProceduralKeyLightSettings({
+          ...(prev.ios ?? resolveProceduralKeyLightSettings()),
+          [key]: value,
+        });
+        setHeroKeyLightPositionByStore((prevPositions) => ({
+          ...prevPositions,
+          ios: proceduralKeyLightPositionFromSettings(nextSettings),
+        }));
+        return {
+          ...prev,
+          ios: nextSettings,
+        };
+      });
+    },
+    [store]
+  );
+
+  const handleHeroCameraSettingsChange = useCallback(
+    (key: keyof ProceduralCameraSettings, value: number) => {
+      if (store !== 'ios') return;
+      setHeroCameraSettingsByStore((prev) => ({
+        ...prev,
+        ios: resolveProceduralCameraSettings({
+          ...(prev.ios ?? DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
+          [key]: value,
+        }),
+      }));
+    },
+    [store]
+  );
+
+  const handleSlot1SbeSettingsChange = useCallback(
+    (key: keyof Slot1SbeSettings, value: number | string) => {
+      if (store !== 'ios' || slot !== 1) return;
+      setSlot1SbeSettingsByStore((prev) => ({
+        ...prev,
+        ios: resolveSlot1SbeSettings({
+          ...(prev.ios ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+          [key]: value,
+        }),
+      }));
+    },
+    [slot, store]
   );
 
   const renderBrowserScreenshotCanvas = useCallback(async (
@@ -975,7 +1233,11 @@ export default function ScreenshotsDialog({
         heroPhonePose: resolvedHeroPhonePose,
         heroPhoneShape: resolvedHeroPhoneShape,
         heroPhoneLocation: resolvedHeroPhoneLocation,
+        heroKeyLightPosition: resolvedHeroKeyLightPosition,
+        heroKeyLightSettings: resolvedHeroKeyLightSettings,
+        slot1SbeSettings: targetSlot === 1 ? resolvedSlot1SbeSettings : null,
         heroCameraMode: resolvedHeroCameraMode,
+        heroCameraSettings: resolvedHeroCameraSettings,
         width: previewCanvasSize.width,
         height: previewCanvasSize.height,
         targetCanvas: canvas,
@@ -995,7 +1257,7 @@ export default function ScreenshotsDialog({
       screenshotSource: screenshotDataUrl || undefined,
     });
     return canvas;
-  }, [browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, resolvedSlot1SbeSettings, slotPalettesByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setPanelState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1171,7 +1433,11 @@ export default function ScreenshotsDialog({
                   }
                   heroPhoneShape={resolvedHeroPhoneShape}
                   heroPhoneLocation={store === 'ios' && previewSlot <= 2 ? resolvedHeroPhoneLocation : null}
+                  heroKeyLightPosition={store === 'ios' && previewSlot <= 2 ? resolvedHeroKeyLightPosition : null}
+                  heroKeyLightSettings={store === 'ios' && previewSlot <= 2 ? resolvedHeroKeyLightSettings : null}
+                  slot1SbeSettings={store === 'ios' && previewSlot === 1 ? resolvedSlot1SbeSettings : null}
                   heroCameraMode={store === 'ios' && previewSlot <= 2 ? resolvedHeroCameraMode : null}
+                  heroCameraSettings={store === 'ios' && previewSlot <= 2 ? resolvedHeroCameraSettings : null}
                   screenshotUrl={filePreviewUrl}
                   imageLoader={browserImageLoader}
                   fontLoadVersion={fontLoadVersion}
@@ -1346,7 +1612,7 @@ export default function ScreenshotsDialog({
                       </div>
                     </label>
                   ))}
-                  {resolvedTitleLineColors.slice(1).map((color, index) => (
+                  {resolvedTitleExtraLineColors.map((color, index) => (
                     <label key={`title-line-${index + 2}`} className="screenshots-palette-item">
                       <div className="screenshots-palette-copy">
                         <strong>Line {index + 2}</strong>
@@ -1367,6 +1633,71 @@ export default function ScreenshotsDialog({
                 </div>
               ) : null}
             </section>
+
+            {store === 'ios' && slot === 1 ? (
+              <section className="screenshots-palette-panel">
+                <button
+                  type="button"
+                  className="screenshots-accordion-head"
+                  onClick={() => togglePanel('sbe')}
+                  disabled={isLocked}
+                >
+                  <div>
+                    <strong>SBE</strong>
+                  </div>
+                  <span>{panelState.sbe ? '−' : '+'}</span>
+                </button>
+
+                {panelState.sbe ? (
+                  <div className="screenshots-shape-grid">
+                    {([
+                      ['lineWidth', 'Line Width', 0.1],
+                      ['opacity', 'Opacity', 0.01],
+                      ['scale', 'Scale', 0.01],
+                      ['angleDeg', 'Angle', 0.1],
+                      ['copyCount', 'Count', 1],
+                      ['positionX', 'Position X', 1],
+                      ['positionY', 'Position Y', 1],
+                      ['originX', 'Origin X', 1],
+                      ['originY', 'Origin Y', 1],
+                      ['originZ', 'Origin Z', 0.01],
+                    ] as const).map(([key, label, step]) => (
+                      <label key={key} className="screenshots-shape-item">
+                        <div className="screenshots-slider-copy">
+                          <strong>{label}</strong>
+                          <code>{resolvedSlot1SbeSettings?.[key] ?? 0}</code>
+                        </div>
+                        <input
+                          type="number"
+                          step={step}
+                          value={resolvedSlot1SbeSettings?.[key] ?? 0}
+                          disabled={isLocked}
+                          onChange={(event) =>
+                            handleSlot1SbeSettingsChange(key, Number(event.target.value))
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label className="screenshots-palette-item">
+                      <div className="screenshots-palette-copy">
+                        <strong>Line Color</strong>
+                      </div>
+                      <div className="screenshots-palette-controls">
+                        <input
+                          type="color"
+                          value={resolvedSlot1SbeSettings?.lineColor ?? '#f38219'}
+                          disabled={isLocked}
+                          onChange={(event) =>
+                            handleSlot1SbeSettingsChange('lineColor', event.target.value)
+                          }
+                        />
+                        <code>{resolvedSlot1SbeSettings?.lineColor ?? '#f38219'}</code>
+                      </div>
+                    </label>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
 
             {isIosHeroSlot ? (
               <section className="screenshots-palette-panel">
@@ -1397,6 +1728,115 @@ export default function ScreenshotsDialog({
                     Orthographic
                   </Button>
                 </div>
+                <div className="screenshots-shape-grid">
+                  {resolvedHeroCameraMode === 'perspective' ? (
+                    <label className="screenshots-shape-item">
+                      <div className="screenshots-slider-copy">
+                        <strong>FOV</strong>
+                        <code>
+                          {resolvedHeroCameraSettings?.perspectiveFov ??
+                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov}
+                        </code>
+                      </div>
+                      <input
+                        type="number"
+                        value={
+                          resolvedHeroCameraSettings?.perspectiveFov ??
+                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov
+                        }
+                        disabled={isLocked || slot > 2}
+                        onChange={(event) =>
+                          handleHeroCameraSettingsChange('perspectiveFov', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  ) : (
+                    <label className="screenshots-shape-item">
+                      <div className="screenshots-slider-copy">
+                        <strong>Frustum Height</strong>
+                        <code>
+                          {resolvedHeroCameraSettings?.orthographicFrustumHeight ??
+                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight}
+                        </code>
+                      </div>
+                      <input
+                        type="number"
+                        value={
+                          resolvedHeroCameraSettings?.orthographicFrustumHeight ??
+                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight
+                        }
+                        disabled={isLocked || slot > 2}
+                        onChange={(event) =>
+                          handleHeroCameraSettingsChange(
+                            'orthographicFrustumHeight',
+                            Number(event.target.value)
+                          )
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {isIosHeroSlot ? (
+              <section className="screenshots-palette-panel">
+                <button
+                  type="button"
+                  className="screenshots-accordion-head"
+                  onClick={() => togglePanel('light')}
+                  disabled={isLocked}
+                >
+                  <div>
+                    <strong>Light</strong>
+                  </div>
+                  <span>{panelState.light ? '−' : '+'}</span>
+                </button>
+
+                {panelState.light ? (
+                  <div className="screenshots-shape-grid">
+                    {([
+                      ['azimuthDeg', 'Azimuth', -3600, 3600, 0.1],
+                      ['elevationDeg', 'Elevation', -89.9, 89.9, 0.1],
+                      ['distance', 'Distance', 0.01, 4000, 0.1],
+                      ['intensity', 'Intensity', 0, 100, 0.01],
+                    ] as const).map(([key, label, min, max, step]) => (
+                      <label key={key} className="screenshots-shape-item">
+                        <div className="screenshots-slider-copy">
+                          <strong>{label}</strong>
+                          <code>{resolvedHeroKeyLightSettings?.[key] ?? 0}</code>
+                        </div>
+                        <input
+                          type="number"
+                          min={min}
+                          max={max}
+                          step={step}
+                          value={resolvedHeroKeyLightSettings?.[key] ?? 0}
+                          disabled={isLocked || slot > 2}
+                          onChange={(event) =>
+                            handleHeroKeyLightSettingsChange(key, Number(event.target.value))
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label className="screenshots-palette-item">
+                      <div className="screenshots-palette-copy">
+                        <strong>Light Color</strong>
+                      </div>
+                      <div className="screenshots-palette-controls">
+                        <input
+                          type="color"
+                          value={resolvedHeroKeyLightSettings?.color ?? '#ffffff'}
+                          disabled={isLocked || slot > 2}
+                          onChange={(event) =>
+                            handleHeroKeyLightSettingsChange('color', event.target.value)
+                          }
+                        />
+                        <code>{resolvedHeroKeyLightSettings?.color ?? '#ffffff'}</code>
+                      </div>
+                    </label>
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -1426,15 +1866,23 @@ export default function ScreenshotsDialog({
                           <strong>{label}</strong>
                           <code>{Math.round(resolvedHeroPhonePose?.[key] ?? 0)}deg</code>
                         </div>
-                        <input
-                          type="range"
-                          min={min}
-                          max={max}
-                          step="1"
-                          value={resolvedHeroPhonePose?.[key] ?? 0}
-                          disabled={isLocked || slot > 2}
-                          onChange={(event) => handleHeroPhonePoseChange(key, Number(event.target.value))}
-                        />
+                        <div className="screenshots-slider-controls">
+                          <input
+                            type="range"
+                            min={min}
+                            max={max}
+                            step="1"
+                            value={resolvedHeroPhonePose?.[key] ?? 0}
+                            disabled={isLocked || slot > 2}
+                            onChange={(event) => handleHeroPhonePoseChange(key, Number(event.target.value))}
+                          />
+                          <input
+                            type="number"
+                            value={Math.round(resolvedHeroPhonePose?.[key] ?? 0)}
+                            disabled={isLocked || slot > 2}
+                            onChange={(event) => handleHeroPhonePoseChange(key, Number(event.target.value))}
+                          />
+                        </div>
                       </label>
                     ))}
                   </div>
@@ -1507,6 +1955,9 @@ export default function ScreenshotsDialog({
                       ['lengthMm', 'Length', 0.1],
                       ['thicknessMm', 'Thickness', 0.01],
                       ['edgeSmoothnessMm', 'Edge Smoothness', 1],
+                      ['islandWidthMm', 'Island Width', 0.1],
+                      ['islandLengthMm', 'Island Length', 0.1],
+                      ['islandRadiusMm', 'Island Radius', 0.1],
                     ] as const).map(([key, label, step]) => (
                       <label key={key} className="screenshots-shape-item">
                         <div className="screenshots-slider-copy">
@@ -1535,6 +1986,18 @@ export default function ScreenshotsDialog({
         <div className="generate-footer">
           <span className="generate-footer-info">{outputPath}</span>
           <div className="generate-footer-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!canSaveSettings}
+              onClick={() => {
+                void handleSaveCurrentSettings().catch((error) => {
+                  setFilePreviewError(error instanceof Error ? error.message : String(error));
+                });
+              }}
+            >
+              {isPersistingPreset ? 'Kaydediliyor...' : 'Ayarları Kaydet'}
+            </Button>
             <Button
               type="button"
               variant="primary"
@@ -1607,7 +2070,11 @@ export default function ScreenshotsDialog({
                     heroPhonePose: resolvedHeroPhonePose,
                     heroPhoneShape: resolvedHeroPhoneShape,
                     heroPhoneLocation: resolvedHeroPhoneLocation,
+                    heroKeyLightPosition: resolvedHeroKeyLightPosition,
+                    heroKeyLightSettings: resolvedHeroKeyLightSettings,
+                    slot1SbeSettings: resolvedSlot1SbeSettings,
                     heroCameraMode: resolvedHeroCameraMode,
+                    heroCameraSettings: resolvedHeroCameraSettings,
                     renderedSlots,
                   });
                 })().catch((error) => {
