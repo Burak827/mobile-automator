@@ -77,6 +77,13 @@ export type ScreenshotPresetRecord = {
   updatedAt: string;
 };
 
+export type ScreenshotTitleTranslationRecord = {
+  appId: number;
+  locale: string;
+  titlesJson: string;
+  updatedAt: string;
+};
+
 export type CreateSyncJobInput = {
   appId: number;
   storeScope: "app_store" | "play_store" | "both";
@@ -177,6 +184,17 @@ function parseScreenshotPresetRow(row: Record<string, unknown>): ScreenshotPrese
     appId: Number(row.app_id),
     store: String(row.store) as ScreenshotStore,
     paletteJson: String(row.palette_json ?? "{}"),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function parseScreenshotTitleTranslationRow(
+  row: Record<string, unknown>
+): ScreenshotTitleTranslationRecord {
+  return {
+    appId: Number(row.app_id),
+    locale: String(row.locale),
+    titlesJson: String(row.titles_json ?? "{}"),
     updatedAt: String(row.updated_at),
   };
 }
@@ -284,10 +302,21 @@ export class MobileAutomatorRepository {
         FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS screenshot_title_translations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        locale TEXT NOT NULL,
+        titles_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(app_id, locale),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_store_locales_app_store ON store_locales(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_locale_details_app_store ON store_locale_details(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_iaps_app_store ON store_iaps(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_screenshot_presets_app ON screenshot_presets(app_id, store);
+      CREATE INDEX IF NOT EXISTS idx_screenshot_title_translations_app ON screenshot_title_translations(app_id, locale);
       CREATE INDEX IF NOT EXISTS idx_naming_overrides_app ON naming_overrides(app_id);
       CREATE INDEX IF NOT EXISTS idx_sync_jobs_app ON sync_jobs(app_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sync_job_logs_job ON sync_job_logs(job_id, created_at ASC);
@@ -653,6 +682,102 @@ export class MobileAutomatorRepository {
       .run(appId, store, paletteJson, updatedAt);
 
     return this.getScreenshotPreset(appId, store)!;
+  }
+
+  listScreenshotTitleTranslations(appId: number): ScreenshotTitleTranslationRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT app_id, locale, titles_json, updated_at
+         FROM screenshot_title_translations
+         WHERE app_id = ?
+         ORDER BY locale ASC`
+      )
+      .all(appId) as Array<Record<string, unknown>>;
+
+    return rows.map(parseScreenshotTitleTranslationRow);
+  }
+
+  getScreenshotTitleTranslation(
+    appId: number,
+    locale: string
+  ): ScreenshotTitleTranslationRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT app_id, locale, titles_json, updated_at
+         FROM screenshot_title_translations
+         WHERE app_id = ? AND locale = ?`
+      )
+      .get(appId, locale) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return parseScreenshotTitleTranslationRow(row);
+  }
+
+  upsertScreenshotTitleTranslation(
+    appId: number,
+    locale: string,
+    titles: unknown
+  ): ScreenshotTitleTranslationRecord {
+    const updatedAt = nowIso();
+    const titlesJson = JSON.stringify(titles ?? {});
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO screenshot_title_translations (app_id, locale, titles_json, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(app_id, locale) DO UPDATE SET
+             titles_json = excluded.titles_json,
+             updated_at = excluded.updated_at`
+        )
+        .run(appId, locale, titlesJson, updatedAt);
+
+      this.db
+        .prepare("UPDATE apps SET updated_at = ? WHERE id = ?")
+        .run(updatedAt, appId);
+    });
+
+    tx();
+
+    return this.getScreenshotTitleTranslation(appId, locale)!;
+  }
+
+  replaceScreenshotTitleTranslations(
+    appId: number,
+    entries: Array<{
+      locale: string;
+      titles: unknown;
+    }>
+  ): ScreenshotTitleTranslationRecord[] {
+    const dedup = new Map<string, string>();
+
+    for (const entry of entries) {
+      const locale = entry.locale.trim();
+      if (!locale) continue;
+      dedup.set(locale, JSON.stringify(entry.titles ?? {}));
+    }
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare("DELETE FROM screenshot_title_translations WHERE app_id = ?")
+        .run(appId);
+
+      const insertStmt = this.db.prepare(
+        `INSERT INTO screenshot_title_translations (app_id, locale, titles_json, updated_at)
+         VALUES (?, ?, ?, ?)`
+      );
+
+      const updatedAt = nowIso();
+      for (const [locale, titlesJson] of dedup.entries()) {
+        insertStmt.run(appId, locale, titlesJson, updatedAt);
+      }
+
+      this.db
+        .prepare("UPDATE apps SET updated_at = ? WHERE id = ?")
+        .run(updatedAt, appId);
+    });
+
+    tx();
+    return this.listScreenshotTitleTranslations(appId);
   }
 
   listNamingOverrides(appId: number): NamingRecord[] {

@@ -44,6 +44,7 @@ import type {
 import type {
   ScreenshotPresetMap,
   ScreenshotDialogStartPayload,
+  ScreenshotTitleTranslationsMap,
 } from './components/organisms/ScreenshotsDialog';
 
 const EMPTY_CREATE_FORM: AppConfigForm = {
@@ -652,6 +653,7 @@ export default function App() {
   const [isGeneratingIap, setIsGeneratingIap] = useState(false);
   const [isGeneratingScreenshot, setIsGeneratingScreenshot] = useState(false);
   const [screenshotPresets, setScreenshotPresets] = useState<ScreenshotPresetMap>({});
+  const [screenshotTitleTranslations, setScreenshotTitleTranslations] = useState<ScreenshotTitleTranslationsMap>({});
   const [appStoreIaps, setAppStoreIaps] = useState<StoreIapEntry[]>([]);
   const [playStoreIaps, setPlayStoreIaps] = useState<StoreIapEntry[]>([]);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
@@ -684,6 +686,7 @@ export default function App() {
     setAppStoreIaps([]);
     setPlayStoreIaps([]);
     setScreenshotPresets({});
+    setScreenshotTitleTranslations({});
     setPendingStoreChanges({});
   }, []);
 
@@ -725,13 +728,17 @@ export default function App() {
 
   const {
     loadScreenshotPresets,
+    loadScreenshotTitleTranslations,
     handleOpenScreenshotsModal,
     handleSaveScreenshotPreset,
+    handleSaveScreenshotTitleTranslations,
+    handleGenerateScreenshotTitleTranslations,
     handleGenerateScreenshot,
   } = useScreenshotActions({
     selectedAppId,
     pushStatus,
     setScreenshotPresets,
+    setScreenshotTitleTranslations,
     setIsScreenshotsOpen,
     setIsGeneratingScreenshot,
   });
@@ -761,9 +768,13 @@ export default function App() {
           setScreenshotPresets({});
           return {};
         }),
+        loadScreenshotTitleTranslations(app.id).catch(() => {
+          setScreenshotTitleTranslations({});
+          return {};
+        }),
       ]);
     },
-    [loadIaps, loadScreenshotPresets, loadStorePanels]
+    [loadIaps, loadScreenshotPresets, loadScreenshotTitleTranslations, loadStorePanels]
   );
 
   const loadApps = useCallback(
@@ -2271,12 +2282,19 @@ export default function App() {
         defaultLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}
         defaultStore={showIosPanel ? 'ios' : 'play_store'}
         presets={screenshotPresets}
+        titleTranslations={screenshotTitleTranslations}
         onClose={() => {
           if (isGeneratingScreenshot) return;
           setIsScreenshotsOpen(false);
         }}
         onPresetChange={(store, palette) => {
           return handleSaveScreenshotPreset(store, palette);
+        }}
+        onTitleTranslationsChange={(translations) => {
+          return handleSaveScreenshotTitleTranslations(translations);
+        }}
+        onGenerateTitleTranslations={(payload) => {
+          return handleGenerateScreenshotTitleTranslations(payload);
         }}
         onStart={(payload) => {
           void handleGenerateScreenshot(payload);

@@ -3,6 +3,7 @@ import type {
   ScreenshotGenerateResponse,
   ScreenshotPresetListResponse,
   ScreenshotPresetResponse,
+  ScreenshotTitleTranslationListResponse,
 } from '../types';
 import type {
   ScreenshotPresetConfig,
@@ -49,6 +50,7 @@ export async function saveScreenshotPreset(
       slotTitles: preset.slotTitles,
       slotTitleExtraLineColors: preset.slotTitleExtraLineColors,
       slotTitleLineGaps: preset.slotTitleLineGaps,
+      slotTitleCenters: preset.slotTitleCenters,
       slotTitleTypography: preset.slotTitleTypography,
       slotBackgroundSettings: preset.slotBackgroundSettings,
       heroPhonePose: preset.heroPhonePose,
@@ -73,4 +75,25 @@ export async function generateScreenshot(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function fetchScreenshotTitleTranslations(
+  appId: number
+): Promise<ScreenshotTitleTranslationListResponse> {
+  return api<ScreenshotTitleTranslationListResponse>(
+    `/api/apps/${appId}/screenshots/title-translations`
+  );
+}
+
+export async function saveScreenshotTitleTranslations(
+  appId: number,
+  translations: Record<string, Record<number, string>>
+): Promise<ScreenshotTitleTranslationListResponse> {
+  return api<ScreenshotTitleTranslationListResponse>(
+    `/api/apps/${appId}/screenshots/title-translations`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ translations }),
+    }
+  );
 }

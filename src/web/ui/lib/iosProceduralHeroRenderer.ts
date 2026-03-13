@@ -69,6 +69,7 @@ type RenderInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  titleCenter?: boolean | null;
   backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette: ScreenshotTemplatePalette;
   screenshotUrl: string;
@@ -160,6 +161,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleCenter: input.titleCenter,
       backgroundSettings,
       palette: input.palette,
       slot1SbeSettings:
@@ -174,6 +176,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleCenter: input.titleCenter,
       backgroundSettings,
       palette: input.palette,
       slot1SbeSettings:

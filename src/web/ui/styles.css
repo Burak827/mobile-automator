@@ -1706,6 +1706,29 @@ button:hover {
   padding: 12px;
 }
 
+.screenshots-apply-all-button {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.screenshots-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.screenshots-field-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .screenshots-accordion-head {
   width: 100%;
   display: flex;

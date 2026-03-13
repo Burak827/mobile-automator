@@ -44,6 +44,11 @@ import {
   resolveScreenshotTitleTypography,
   type ScreenshotTitleTypography,
 } from "./screenshotTemplates/screenshotTitleTypography.js";
+import {
+  createDefaultScreenshotTitleCenterMap,
+  parseScreenshotTitleCenterInput,
+  resolveStoredScreenshotTitleCenterMap,
+} from "./screenshotTemplates/screenshotTitleAlignment.js";
 import { resolveStoredScreenshotTitleExtraLineColorsMap } from "./screenshotTemplates/screenshotTitleColors.js";
 import {
   resolveStoredScreenshotBackgroundSettingsMap,
@@ -609,6 +614,21 @@ export function parseScreenshotSlotTitlesInput(
   return parseStoredScreenshotSlotTitles(value);
 }
 
+export function parseScreenshotTitleTranslationsInput(
+  value: unknown
+): Record<string, Record<ScreenshotTemplateSlot, string>> {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const next: Record<string, Record<ScreenshotTemplateSlot, string>> = {};
+
+  for (const [locale, titles] of Object.entries(raw)) {
+    const normalizedLocale = toNonEmptyString(locale);
+    if (!normalizedLocale) continue;
+    next[normalizedLocale] = parseStoredScreenshotSlotTitles(titles);
+  }
+
+  return next;
+}
+
 export function parseScreenshotSlotTitleExtraLineColorsInput(
   value: unknown
 ): Record<ScreenshotTemplateSlot, string[]> {
@@ -640,6 +660,20 @@ export function parseScreenshotSlotTitleLineGapsInput(
   return next;
 }
 
+export function parseScreenshotSlotTitleCentersInput(
+  value: unknown
+): Record<ScreenshotTemplateSlot, boolean> {
+  const defaults = createDefaultScreenshotTitleCenterMap();
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const next = { ...defaults };
+
+  for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
+    next[slot] = parseScreenshotTitleCenterInput(raw[String(slot)], defaults[slot]);
+  }
+
+  return next;
+}
+
 export function parseScreenshotSlotTitleTypographyInput(
   store: ScreenshotStore,
   value: unknown
@@ -662,6 +696,7 @@ export function parseStoredScreenshotPresetConfig(
   slotTitles: Record<ScreenshotTemplateSlot, string>;
   slotTitleExtraLineColors: Record<ScreenshotTemplateSlot, string[]>;
   slotTitleLineGaps: Record<ScreenshotTemplateSlot, number>;
+  slotTitleCenters: Record<ScreenshotTemplateSlot, boolean>;
   slotTitleTypography: Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>;
   slotBackgroundSettings: Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>;
   heroPhonePose: IosHeroPhonePose | null;
@@ -681,6 +716,7 @@ export function parseStoredScreenshotPresetConfig(
       slotTitles: parseStoredScreenshotSlotTitles(undefined),
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
+      slotTitleCenters: parseScreenshotSlotTitleCentersInput(undefined),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
       slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
@@ -701,6 +737,7 @@ export function parseStoredScreenshotPresetConfig(
     "slotTitles" in raw ||
     "slotTitleExtraLineColors" in raw ||
     "slotTitleLineGaps" in raw ||
+    "slotTitleCenters" in raw ||
     "titleLineGap" in raw ||
     "slotTitleTypography" in raw ||
     "slotBackgroundSettings" in raw ||
@@ -721,6 +758,7 @@ export function parseStoredScreenshotPresetConfig(
       slotTitles: parseStoredScreenshotSlotTitles(raw.slotTitles),
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(raw.slotTitleExtraLineColors),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(raw.slotTitleLineGaps, raw.titleLineGap),
+      slotTitleCenters: parseScreenshotSlotTitleCentersInput(raw.slotTitleCenters),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, raw.slotTitleTypography),
       slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(raw.slotBackgroundSettings),
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, raw.heroPhonePose),
@@ -745,6 +783,7 @@ export function parseStoredScreenshotPresetConfig(
     slotTitles: parseStoredScreenshotSlotTitles(undefined),
     slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
     slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
+    slotTitleCenters: parseScreenshotSlotTitleCentersInput(undefined),
     slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
     slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
     heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
@@ -780,6 +819,7 @@ export function serializeScreenshotPresetRecord(record: {
     slotTitles: config.slotTitles,
     slotTitleExtraLineColors: config.slotTitleExtraLineColors,
     slotTitleLineGaps: config.slotTitleLineGaps,
+    slotTitleCenters: config.slotTitleCenters,
     slotTitleTypography: config.slotTitleTypography,
     slotBackgroundSettings: config.slotBackgroundSettings,
     heroPhonePose: config.heroPhonePose,
@@ -790,6 +830,18 @@ export function serializeScreenshotPresetRecord(record: {
     slotSbeSettings: config.slotSbeSettings,
     heroCameraMode: config.heroCameraMode,
     heroCameraSettings: config.heroCameraSettings,
+    updatedAt: record.updatedAt,
+  };
+}
+
+export function serializeScreenshotTitleTranslationRecord(record: {
+  locale: string;
+  titlesJson: string;
+  updatedAt: string;
+}) {
+  return {
+    locale: record.locale,
+    slotTitles: parseScreenshotSlotTitlesInput(parseJsonOrUndefined(record.titlesJson)),
     updatedAt: record.updatedAt,
   };
 }

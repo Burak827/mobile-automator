@@ -26,6 +26,7 @@ import {
   resolveScreenshotBackgroundSettings,
   type ScreenshotBackgroundSettings,
 } from './screenshotBackgroundSettings.js';
+import { parseScreenshotTitleCenterInput } from './screenshotTitleAlignment.js';
 import {
   SLOT_1_SBE_ORIGIN,
   SLOT_1_SBE_PATH_D,
@@ -60,6 +61,7 @@ export type StoreScreenshotCanvasInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  titleCenter?: boolean | null;
   backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette?: Partial<ScreenshotTemplatePalette> | null;
   screenshotSource?: ScreenshotCanvasImageSource;
@@ -110,6 +112,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleCenter: input.titleCenter,
       backgroundSettings,
       palette,
       screenshotImage,
@@ -127,6 +130,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleCenter: input.titleCenter,
       backgroundSettings,
       palette,
       screenshotImage,
@@ -152,6 +156,7 @@ function drawIosFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -179,6 +184,7 @@ function drawIosSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -196,6 +202,7 @@ function drawIosSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    titleCenter: input.titleCenter,
     backgroundSettings: input.backgroundSettings,
     palette: input.palette,
     slot1SbeSettings: input.slot1SbeSettings,
@@ -238,6 +245,7 @@ export function drawIosSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
@@ -263,6 +271,7 @@ export function drawIosSplitHeroBackdrop(
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
     y: IOS_TITLE_BLOCK_Y,
+    maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -271,6 +280,7 @@ export function drawIosSplitHeroBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
+    center: parseScreenshotTitleCenterInput(input.titleCenter, false),
   });
 }
 
@@ -319,6 +329,7 @@ function drawIosPoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -356,6 +367,7 @@ export function drawIosPosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     width: number;
@@ -375,6 +387,7 @@ export function drawIosPosterBackdrop(
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
     y: IOS_TITLE_BLOCK_Y,
+    maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -383,6 +396,7 @@ export function drawIosPosterBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
+    center: parseScreenshotTitleCenterInput(input.titleCenter, false),
   });
 }
 
@@ -394,6 +408,7 @@ function drawPlayStoreFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -419,6 +434,7 @@ function drawPlayStoreSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -434,6 +450,7 @@ function drawPlayStoreSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    titleCenter: input.titleCenter,
     backgroundSettings: input.backgroundSettings,
     palette: input.palette,
     slot1SbeSettings: input.slot1SbeSettings,
@@ -476,6 +493,7 @@ export function drawPlayStoreSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
@@ -501,6 +519,7 @@ export function drawPlayStoreSplitHeroBackdrop(
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
     y: PLAY_STORE_TITLE_BLOCK_Y,
+    maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -509,6 +528,7 @@ export function drawPlayStoreSplitHeroBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
+    center: parseScreenshotTitleCenterInput(input.titleCenter, false),
   });
 }
 
@@ -531,6 +551,7 @@ function drawPlayStorePoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
@@ -568,6 +589,7 @@ export function drawPlayStorePosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     width: number;
@@ -587,6 +609,7 @@ export function drawPlayStorePosterBackdrop(
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
     y: PLAY_STORE_TITLE_BLOCK_Y,
+    maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: input.titleTypography.fontSize,
@@ -595,6 +618,7 @@ export function drawPlayStorePosterBackdrop(
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
+    center: parseScreenshotTitleCenterInput(input.titleCenter, false),
   });
 }
 
@@ -832,6 +856,7 @@ function drawTitleBlock(
   input: {
     x: number;
     y: number;
+    maxWidth?: number;
     lines: string[];
     fontFamily: string;
     fontSize: number;
@@ -842,16 +867,25 @@ function drawTitleBlock(
     color: string;
     accentColor?: string;
     accentFirstLine?: boolean;
+    center?: boolean;
   }
 ): void {
-  ctx.textAlign = 'left';
+  const isCentered = parseScreenshotTitleCenterInput(input.center, false);
+  const anchorX = isCentered
+    ? input.x + Math.max(0, input.maxWidth ?? 0) / 2
+    : input.x;
+  ctx.textAlign = isCentered ? 'center' : 'left';
   ctx.textBaseline = 'top';
   ctx.font = `${input.weight} ${input.fontSize}px ${composeFontStack(input.fontFamily)}`;
   for (const [index, line] of input.lines.entries()) {
     ctx.fillStyle =
       input.lineColors?.[index] ??
       (input.accentFirstLine && index === 0 && input.accentColor ? input.accentColor : input.color);
-    ctx.fillText(line, input.x, input.y + index * (input.lineHeight + (input.lineGap ?? 0)));
+    ctx.fillText(
+      line,
+      anchorX,
+      input.y + index * (input.lineHeight + (input.lineGap ?? 0))
+    );
   }
 }
 

@@ -193,6 +193,7 @@ export type ScreenshotSlotPaletteMapPayload = Partial<Record<number, ScreenshotP
 export type ScreenshotSlotTitleMapPayload = Partial<Record<number, string>>;
 export type ScreenshotSlotTitleExtraLineColorsMapPayload = Partial<Record<number, string[]>>;
 export type ScreenshotSlotTitleLineGapMapPayload = Partial<Record<number, number>>;
+export type ScreenshotSlotTitleCenterMapPayload = Partial<Record<number, boolean>>;
 export type ScreenshotTitleTypographyPayload = {
   fontFamily: string;
   fontSize: number;
@@ -308,6 +309,7 @@ export type ScreenshotPresetPayload = {
   slotTitles?: ScreenshotSlotTitleMapPayload;
   slotTitleExtraLineColors?: ScreenshotSlotTitleExtraLineColorsMapPayload;
   slotTitleLineGaps?: ScreenshotSlotTitleLineGapMapPayload;
+  slotTitleCenters?: ScreenshotSlotTitleCenterMapPayload;
   slotTitleTypography?: ScreenshotSlotTitleTypographyMapPayload;
   heroPhonePose: ScreenshotHeroPhonePosePayload | null;
   heroPhoneShape: ScreenshotHeroPhoneShapePayload | null;
@@ -329,6 +331,22 @@ export type ScreenshotPresetListResponse = {
 export type ScreenshotPresetResponse = {
   appId: number;
   preset: ScreenshotPresetPayload;
+};
+
+export type ScreenshotTitleTranslationEntryPayload = {
+  locale: string;
+  slotTitles: ScreenshotSlotTitleMapPayload;
+  updatedAt: string;
+};
+
+export type ScreenshotTitleTranslationListResponse = {
+  appId: number;
+  translations: ScreenshotTitleTranslationEntryPayload[];
+};
+
+export type ScreenshotTitleTranslationResponse = {
+  appId: number;
+  translation: ScreenshotTitleTranslationEntryPayload;
 };
 
 export type StoreLocaleDetailPayload = {
