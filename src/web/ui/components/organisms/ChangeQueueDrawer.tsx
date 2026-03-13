@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Button from '../atoms/Button';
-import type { PendingStoreChange, StoreId } from '../../types';
+import type { PendingStoreChange, ScreenshotUploadBatchPayload, StoreId } from '../../types';
 
 function formatStoreLabel(store: StoreId): string {
   if (store === 'app_store') return 'iOS';
@@ -26,6 +26,7 @@ type Props = {
   isOpen: boolean;
   isBusy: boolean;
   changes: PendingStoreChange[];
+  screenshotBatches: ScreenshotUploadBatchPayload[];
   onToggle: () => void;
   onClear: () => void;
   onExport: () => void;
@@ -40,6 +41,7 @@ export default function ChangeQueueDrawer({
   isOpen,
   isBusy,
   changes,
+  screenshotBatches,
   onToggle,
   onClear,
   onExport,
@@ -51,9 +53,15 @@ export default function ChangeQueueDrawer({
 }: Props) {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
-  const count = Array.isArray(changes) ? changes.length : 0;
-  const iosCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'app_store').length : 0;
-  const playCount = Array.isArray(changes) ? changes.filter((c) => c.store === 'play_store').length : 0;
+  const changeCount = Array.isArray(changes) ? changes.length : 0;
+  const batchCount = Array.isArray(screenshotBatches) ? screenshotBatches.length : 0;
+  const count = changeCount + batchCount;
+  const iosCount =
+    (Array.isArray(changes) ? changes.filter((c) => c.store === 'app_store').length : 0) +
+    (Array.isArray(screenshotBatches) ? screenshotBatches.filter((batch) => batch.store === 'ios').length : 0);
+  const playCount =
+    (Array.isArray(changes) ? changes.filter((c) => c.store === 'play_store').length : 0) +
+    (Array.isArray(screenshotBatches) ? screenshotBatches.filter((batch) => batch.store === 'play_store').length : 0);
   const drawerClass = `changes-drawer ${isOpen ? 'open' : 'closed'}`;
 
   return (
@@ -83,49 +91,82 @@ export default function ChangeQueueDrawer({
           {count === 0 ? (
             <p>Henüz değişiklik yok. Store alanlarını düzenledikçe burada listelenecek.</p>
           ) : (
-            <ul className="change-list">
-              {changes.map((entry) => (
-                <li key={entry.key} className="change-item">
-                  <div className="change-item-head">
-                    <strong>{formatStoreLabel(entry.store)}</strong>
-                    <button
-                      type="button"
-                      className="change-item-remove"
-                      title="Bu değişikliği sil"
-                      onClick={() => onRemoveChange(entry.key)}
-                    >
-                      &times;
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="change-item-locale"
-                    title={`${entry.locale} locale'ine git`}
-                    onClick={() => onNavigateToLocale(entry.store, entry.locale)}
-                  >
-                    {entry.locale}
-                  </button>
-                  <div className="change-field">{formatChangeTitle(entry)}</div>
-                  {entry.kind === 'iap_field' ? (
-                    <div className="change-field">
-                      {entry.productId}
-                      {entry.iapType ? ` · ${entry.iapType}` : ''}
-                    </div>
-                  ) : null}
-                  {entry.kind === 'locale' ? (
-                    <div className="change-values">
-                      <code>{entry.action === 'add' ? 'eklensin' : 'silinsin'}</code>
-                    </div>
-                  ) : (
-                    <div className="change-values">
-                      <code>{toDisplayValue(entry.oldValue)}</code>
-                      <span>→</span>
-                      <code>{toDisplayValue(entry.newValue)}</code>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <>
+              {changeCount > 0 ? (
+                <div className="changes-drawer-group">
+                  <div className="changes-drawer-group-head">Alan Değişiklikleri</div>
+                  <ul className="change-list">
+                    {changes.map((entry) => (
+                      <li key={entry.key} className="change-item">
+                        <div className="change-item-head">
+                          <strong>{formatStoreLabel(entry.store)}</strong>
+                          <button
+                            type="button"
+                            className="change-item-remove"
+                            title="Bu değişikliği sil"
+                            onClick={() => onRemoveChange(entry.key)}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="change-item-locale"
+                          title={`${entry.locale} locale'ine git`}
+                          onClick={() => onNavigateToLocale(entry.store, entry.locale)}
+                        >
+                          {entry.locale}
+                        </button>
+                        <div className="change-field">{formatChangeTitle(entry)}</div>
+                        {entry.kind === 'iap_field' ? (
+                          <div className="change-field">
+                            {entry.productId}
+                            {entry.iapType ? ` · ${entry.iapType}` : ''}
+                          </div>
+                        ) : null}
+                        {entry.kind === 'locale' ? (
+                          <div className="change-values">
+                            <code>{entry.action === 'add' ? 'eklensin' : 'silinsin'}</code>
+                          </div>
+                        ) : (
+                          <div className="change-values">
+                            <code>{toDisplayValue(entry.oldValue)}</code>
+                            <span>→</span>
+                            <code>{toDisplayValue(entry.newValue)}</code>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {batchCount > 0 ? (
+                <div className="changes-drawer-group">
+                  <div className="changes-drawer-group-head">Screenshot Batch</div>
+                  <ul className="change-list">
+                    {screenshotBatches.map((batch) => (
+                      <li key={`${batch.store}-${batch.updatedAt}`} className="change-item">
+                        <div className="change-item-head">
+                          <strong>{batch.store === 'ios' ? 'iOS' : 'Play'}</strong>
+                          <span className="change-batch-status">{batch.status}</span>
+                        </div>
+                        <div className="change-field">
+                          {batch.locales.length} locale hazır
+                        </div>
+                        <div className="change-values">
+                          <code>{batch.outputRoot}</code>
+                        </div>
+                        <div className="change-field">{batch.locales.join(', ')}</div>
+                        {batch.errorMessage ? (
+                          <div className="change-field change-field-error">{batch.errorMessage}</div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
 

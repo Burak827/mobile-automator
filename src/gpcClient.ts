@@ -72,6 +72,8 @@ export class GpcClient {
 
   private static readonly BASE_URL =
     "https://androidpublisher.googleapis.com";
+  private static readonly UPLOAD_BASE_URL =
+    "https://androidpublisher.googleapis.com/upload";
 
   async request<T>(
     method: string,
@@ -127,6 +129,43 @@ export class GpcClient {
 
   delete(path: string): Promise<void> {
     return this.request<void>("DELETE", path);
+  }
+
+  async uploadMedia<T>(
+    path: string,
+    body: Buffer,
+    contentType: string
+  ): Promise<T> {
+    const token = await this.getAccessToken();
+    const url = `${GpcClient.UPLOAD_BASE_URL}${path}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": contentType,
+        "Content-Length": String(body.length),
+      },
+      body: new Uint8Array(body),
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      let message = `Google Play media upload failed (${response.status} ${response.statusText})`;
+      if (text) {
+        try {
+          const payload = JSON.parse(text);
+          const detail = payload?.error?.message ?? text;
+          message = `${message}: ${detail}`;
+        } catch {
+          message = `${message}: ${text}`;
+        }
+      }
+      throw new Error(message);
+    }
+
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
   }
 
   async createEdit(packageName: string): Promise<string> {

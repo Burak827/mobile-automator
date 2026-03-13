@@ -84,6 +84,16 @@ export type ScreenshotTitleTranslationRecord = {
   updatedAt: string;
 };
 
+export type ScreenshotUploadBatchRecord = {
+  appId: number;
+  store: ScreenshotStore;
+  status: "pending" | "uploading" | "failed";
+  localesJson: string;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+};
+
 export type CreateSyncJobInput = {
   appId: number;
   storeScope: "app_store" | "play_store" | "both";
@@ -108,6 +118,15 @@ function toBoolean(value: unknown): boolean {
     return ["1", "true", "yes", "y"].includes(normalized);
   }
   return false;
+}
+
+function parseJsonSafe(raw?: string): unknown {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseAppRow(row: Record<string, unknown>): AppRecord {
@@ -196,6 +215,20 @@ function parseScreenshotTitleTranslationRow(
     locale: String(row.locale),
     titlesJson: String(row.titles_json ?? "{}"),
     updatedAt: String(row.updated_at),
+  };
+}
+
+function parseScreenshotUploadBatchRow(
+  row: Record<string, unknown>
+): ScreenshotUploadBatchRecord {
+  return {
+    appId: Number(row.app_id),
+    store: String(row.store) as ScreenshotStore,
+    status: String(row.status) as ScreenshotUploadBatchRecord["status"],
+    localesJson: String(row.locales_json ?? "[]"),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    errorMessage: toOptionalString(row.error_message),
   };
 }
 
@@ -312,11 +345,25 @@ export class MobileAutomatorRepository {
         FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS screenshot_upload_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        store TEXT NOT NULL CHECK (store IN ('ios', 'play_store')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'uploading', 'failed')),
+        locales_json TEXT NOT NULL,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(app_id, store),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_store_locales_app_store ON store_locales(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_locale_details_app_store ON store_locale_details(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_store_iaps_app_store ON store_iaps(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_screenshot_presets_app ON screenshot_presets(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_screenshot_title_translations_app ON screenshot_title_translations(app_id, locale);
+      CREATE INDEX IF NOT EXISTS idx_screenshot_upload_batches_app ON screenshot_upload_batches(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_naming_overrides_app ON naming_overrides(app_id);
       CREATE INDEX IF NOT EXISTS idx_sync_jobs_app ON sync_jobs(app_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sync_job_logs_job ON sync_job_logs(job_id, created_at ASC);
@@ -778,6 +825,148 @@ export class MobileAutomatorRepository {
 
     tx();
     return this.listScreenshotTitleTranslations(appId);
+  }
+
+  listScreenshotUploadBatches(appId: number): ScreenshotUploadBatchRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT app_id, store, status, locales_json, error_message, created_at, updated_at
+         FROM screenshot_upload_batches
+         WHERE app_id = ?
+         ORDER BY store ASC`
+      )
+      .all(appId) as Array<Record<string, unknown>>;
+    return rows.map(parseScreenshotUploadBatchRow);
+  }
+
+  getScreenshotUploadBatch(
+    appId: number,
+    store: ScreenshotStore
+  ): ScreenshotUploadBatchRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT app_id, store, status, locales_json, error_message, created_at, updated_at
+         FROM screenshot_upload_batches
+         WHERE app_id = ? AND store = ?`
+      )
+      .get(appId, store) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return parseScreenshotUploadBatchRow(row);
+  }
+
+  upsertScreenshotUploadBatch(
+    appId: number,
+    store: ScreenshotStore,
+    locales: string[]
+  ): ScreenshotUploadBatchRecord {
+    const existing = this.getScreenshotUploadBatch(appId, store);
+    const existingLocales = Array.isArray(parseJsonSafe(existing?.localesJson))
+      ? ((parseJsonSafe(existing?.localesJson) as string[]).map((locale) => locale.trim()).filter(Boolean))
+      : [];
+    const nextLocales = Array.from(
+      new Set([...existingLocales, ...locales.map((locale) => locale.trim()).filter(Boolean)])
+    ).sort((a, b) => a.localeCompare(b));
+    const now = nowIso();
+
+    this.db
+      .prepare(
+        `INSERT INTO screenshot_upload_batches (
+           app_id, store, status, locales_json, error_message, created_at, updated_at
+         )
+         VALUES (?, ?, 'pending', ?, NULL, ?, ?)
+         ON CONFLICT(app_id, store) DO UPDATE SET
+           status = 'pending',
+           locales_json = excluded.locales_json,
+           error_message = NULL,
+           updated_at = excluded.updated_at`
+      )
+      .run(appId, store, JSON.stringify(nextLocales), existing?.createdAt ?? now, now);
+
+    this.db
+      .prepare("UPDATE apps SET updated_at = ? WHERE id = ?")
+      .run(now, appId);
+
+    return this.getScreenshotUploadBatch(appId, store)!;
+  }
+
+  replaceScreenshotUploadBatchLocales(
+    appId: number,
+    store: ScreenshotStore,
+    locales: string[],
+    status: ScreenshotUploadBatchRecord["status"] = "pending",
+    errorMessage?: string
+  ): ScreenshotUploadBatchRecord | undefined {
+    const nextLocales = Array.from(
+      new Set(locales.map((locale) => locale.trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+    if (nextLocales.length === 0) {
+      this.deleteScreenshotUploadBatch(appId, store);
+      return undefined;
+    }
+
+    const existing = this.getScreenshotUploadBatch(appId, store);
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO screenshot_upload_batches (
+           app_id, store, status, locales_json, error_message, created_at, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(app_id, store) DO UPDATE SET
+           status = excluded.status,
+           locales_json = excluded.locales_json,
+           error_message = excluded.error_message,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        appId,
+        store,
+        status,
+        JSON.stringify(nextLocales),
+        toOptionalString(errorMessage),
+        existing?.createdAt ?? now,
+        now
+      );
+
+    return this.getScreenshotUploadBatch(appId, store);
+  }
+
+  markScreenshotUploadBatchUploading(
+    appId: number,
+    store: ScreenshotStore
+  ): ScreenshotUploadBatchRecord | undefined {
+    const now = nowIso();
+    this.db
+      .prepare(
+        `UPDATE screenshot_upload_batches
+         SET status = 'uploading',
+             error_message = NULL,
+             updated_at = ?
+         WHERE app_id = ? AND store = ?`
+      )
+      .run(now, appId, store);
+    return this.getScreenshotUploadBatch(appId, store);
+  }
+
+  markScreenshotUploadBatchFailed(
+    appId: number,
+    store: ScreenshotStore,
+    errorMessage: string,
+    locales?: string[]
+  ): ScreenshotUploadBatchRecord | undefined {
+    const existing = this.getScreenshotUploadBatch(appId, store);
+    const nextLocales = locales
+      ? locales
+      : Array.isArray(parseJsonSafe(existing?.localesJson))
+        ? ((parseJsonSafe(existing?.localesJson) as string[]).map((locale) => locale.trim()).filter(Boolean))
+        : [];
+    return this.replaceScreenshotUploadBatchLocales(appId, store, nextLocales, "failed", errorMessage);
+  }
+
+  deleteScreenshotUploadBatch(appId: number, store: ScreenshotStore): void {
+    this.db
+      .prepare("DELETE FROM screenshot_upload_batches WHERE app_id = ? AND store = ?")
+      .run(appId, store);
   }
 
   listNamingOverrides(appId: number): NamingRecord[] {

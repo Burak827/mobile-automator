@@ -846,6 +846,34 @@ export function serializeScreenshotTitleTranslationRecord(record: {
   };
 }
 
+export function serializeScreenshotUploadBatchRecord(record: {
+  appId: number;
+  store: ScreenshotStore;
+  status: "pending" | "uploading" | "failed";
+  localesJson: string;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+}) {
+  const localesRaw = parseJsonOrUndefined(record.localesJson);
+  const locales = Array.isArray(localesRaw)
+    ? localesRaw
+        .filter((locale): locale is string => typeof locale === "string")
+        .map((locale) => locale.trim())
+        .filter((locale) => locale.length > 0)
+        .sort((a, b) => a.localeCompare(b))
+    : [];
+  return {
+    appId: record.appId,
+    store: record.store,
+    status: record.status,
+    locales,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    errorMessage: record.errorMessage,
+  };
+}
+
 function parseStoredScreenshotSlotPalettes(
   store: ScreenshotStore,
   value: unknown,

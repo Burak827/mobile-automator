@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import JSZip from 'jszip';
 import { useDialogController } from '../../hooks/useDialogController';
 import Button from '../atoms/Button';
@@ -765,6 +774,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
     <button
       type="button"
       className={`screenshots-thumb-card${selected ? ' selected' : ''}`}
+      style={{ aspectRatio: `${previewWidth} / ${previewHeight}` }}
       onClick={() => onSelect(slot)}
       disabled={disabled}
     >
@@ -789,9 +799,14 @@ export default function ScreenshotsDialog({
   onGenerateTitleTranslations,
   onStart,
 }: Props) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const resizePointerIdRef = useRef<number | null>(null);
   const [store, setStore] = useState<ScreenshotStore>('ios');
   const [slot, setSlot] = useState<ScreenshotTemplateSlot>(1);
+  const [sourceLocale, setSourceLocale] = useState<string>('en_US');
   const [locale, setLocale] = useState<string>('en-US');
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [titleTranslationsState, setTitleTranslationsState] = useState<ScreenshotTitleTranslationsMap>({});
   const [titlesByStore, setTitlesByStore] = useState<Record<ScreenshotStore, ScreenshotSlotTitleMap>>({
     ios: createEmptySlotTitleMap(),
@@ -971,6 +986,47 @@ export default function ScreenshotsDialog({
   const browserImageLoader = useMemo(() => createBrowserCanvasImageLoader(), []);
 
   useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const rect = editor.getBoundingClientRect();
+      const nextWidth = rect.right - event.clientX;
+      const minWidth = 220;
+      const maxWidth = Math.max(minWidth, Math.floor(rect.width * 0.65));
+      setSidebarWidth(Math.min(maxWidth, Math.max(minWidth, nextWidth)));
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (resizePointerIdRef.current !== null && event.pointerId !== resizePointerIdRef.current) {
+        return;
+      }
+      resizePointerIdRef.current = null;
+      setIsResizingSidebar(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizingSidebar]);
+
+  const handleSidebarResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    resizePointerIdRef.current = event.pointerId;
+    setIsResizingSidebar(true);
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) {
       wasOpenRef.current = false;
       return;
@@ -979,6 +1035,7 @@ export default function ScreenshotsDialog({
     wasOpenRef.current = true;
 
     const nextLocale = defaultLocale.trim() || 'en-US';
+    const nextSourceLocale = 'en_US';
     const initialIosPreset = mergeScreenshotPresetConfig(
       presets?.ios,
       readScreenshotDraft(appId, 'ios')
@@ -1080,6 +1137,7 @@ export default function ScreenshotsDialog({
       play_store: resolveProceduralCameraSettings(initialPlayPreset?.heroCameraSettings),
     };
     setStore(defaultStore);
+    setSourceLocale(nextSourceLocale);
     setLocale(nextLocale);
     setSlot(1);
     setTitleTranslationsState(mergedTitleTranslations);
@@ -2028,7 +2086,7 @@ export default function ScreenshotsDialog({
     try {
       const nextTranslations = await Promise.resolve(
         onGenerateTitleTranslations({
-          sourceLocale: activeLocaleKey,
+          sourceLocale: sourceLocale.trim() || 'en_US',
           sourceTitles,
           locales: titleTranslationTargetLocales,
           verify: true,
@@ -2040,7 +2098,7 @@ export default function ScreenshotsDialog({
     } finally {
       setIsGeneratingTitleTranslations(false);
     }
-  }, [activeLocaleKey, onGenerateTitleTranslations, store, titleTranslationSourceSlots, titleTranslationTargetLocales, titleTranslationsState, titlesByStore]);
+  }, [onGenerateTitleTranslations, sourceLocale, store, titleTranslationSourceSlots, titleTranslationTargetLocales, titleTranslationsState, titlesByStore, activeLocaleKey]);
 
   const handleHeroPhonePoseChange = useCallback(
     (key: keyof IosHeroPhonePose, value: number) => {
@@ -2377,7 +2435,11 @@ export default function ScreenshotsDialog({
           ))}
         </div>
 
-        <div className="screenshots-editor">
+        <div
+          ref={editorRef}
+          className={`screenshots-editor${isResizingSidebar ? ' is-resizing' : ''}`}
+          style={{ '--screenshots-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+        >
           <section className="screenshots-preview-column">
             <div className="screenshots-preview-head">
               <div>
@@ -2435,24 +2497,47 @@ export default function ScreenshotsDialog({
             </div>
           </section>
 
+          <div
+            className="screenshots-sidebar-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize settings panel"
+            onPointerDown={handleSidebarResizeStart}
+          />
+
           <aside className="screenshots-sidebar">
-            <div className="screenshot-form-grid">
+            <div className="screenshot-form-grid screenshots-top-grid">
               <label>
-                Locale
+                Source Locale
                 <input
-                  list="screenshots-zip-locales"
                   type="text"
-                  value={locale}
-                  onChange={(event) => setLocale(event.target.value)}
-                  placeholder="en-US"
+                  value={sourceLocale}
+                  onChange={(event) => setSourceLocale(event.target.value)}
+                  placeholder="en_US"
                   disabled={isLocked}
                 />
               </label>
-              <datalist id="screenshots-zip-locales">
-                {zipLocaleKeys.map((item) => (
-                  <option key={item} value={item} />
-                ))}
-              </datalist>
+
+              <label>
+                Locales
+                <select
+                  value={activeZipLocaleKey ?? locale}
+                  onChange={(event) => setLocale(event.target.value)}
+                  disabled={isLocked}
+                >
+                  {zipLocaleKeys.length > 0 ? (
+                    zipLocaleKeys.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={locale.trim() || defaultLocale.trim() || 'en-US'}>
+                      {locale.trim() || defaultLocale.trim() || 'en-US'}
+                    </option>
+                  )}
+                </select>
+              </label>
 
               <label>
                 Slot
@@ -2469,6 +2554,78 @@ export default function ScreenshotsDialog({
                 </select>
               </label>
             </div>
+
+            <label className="screenshot-file-field">
+              Screenshots ZIP
+              <input
+                type="file"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                disabled={isLocked}
+                onChange={(event) => {
+                  const nextFile = event.target.files?.[0] ?? null;
+                  handleZipFileChange(nextFile);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            <div className="screenshot-file-meta">
+              {zipFilesByStore[store]
+                ? `${zipFilesByStore[store]?.name} - ${zipLocaleKeys.length} locale`
+                : 'Henüz ZIP seçilmedi.'}
+            </div>
+            {zipLocaleKeys.length > 0 ? (
+              <section className="screenshots-zip-summary">
+                <div className="screenshots-zip-summary-head">
+                  <strong>ZIP Özeti</strong>
+                  <span>
+                    {zipCompleteLocaleCount}/{zipLocaleKeys.length} locale tam
+                  </span>
+                </div>
+                <div className="screenshots-zip-summary-list">
+                  {zipLocaleSummary.map((entry) => (
+                    <div
+                      key={entry.locale}
+                      className={`screenshots-zip-summary-item${
+                        entry.locale === activeZipLocaleKey ? ' active' : ''
+                      }`}
+                    >
+                      <strong>{entry.locale}</strong>
+                      <span>
+                        {entry.isComplete
+                          ? '1-6 hazır'
+                          : `Eksik: ${entry.missingSlots.join(', ')}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <label className="screenshot-file-field">
+              Screenshot Fallback
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg"
+                disabled={isLocked}
+                onChange={(event) => {
+                  const nextFile = event.target.files?.[0] ?? null;
+                  handleSlotFileChange(nextFile);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            <div className="screenshot-file-meta">
+              {selectedZipEntry
+                ? `${activeZipLocaleKey}/${selectedZipEntry.fileName}`
+                : selectedSlotFile
+                ? `${selectedSlotFile.name} - ${formatFileSize(selectedSlotFile.size)}`
+                : 'Henüz dosya seçilmedi.'}
+            </div>
+            {selectedSlotPreviewError ? (
+              <div className="screenshot-file-error">{selectedSlotPreviewError}</div>
+            ) : null}
 
             <label className="screenshot-title-field">
               <div className="screenshots-field-head">
@@ -2634,78 +2791,6 @@ export default function ScreenshotsDialog({
                 Fabrika Ayarlarına Dön
               </Button>
             </div>
-
-            <label className="screenshot-file-field">
-              Screenshots ZIP
-              <input
-                type="file"
-                accept=".zip,application/zip,application/x-zip-compressed"
-                disabled={isLocked}
-                onChange={(event) => {
-                  const nextFile = event.target.files?.[0] ?? null;
-                  handleZipFileChange(nextFile);
-                  event.currentTarget.value = '';
-                }}
-              />
-            </label>
-
-            <div className="screenshot-file-meta">
-              {zipFilesByStore[store]
-                ? `${zipFilesByStore[store]?.name} - ${zipLocaleKeys.length} locale`
-                : 'Henüz ZIP seçilmedi.'}
-            </div>
-            {zipLocaleKeys.length > 0 ? (
-              <section className="screenshots-zip-summary">
-                <div className="screenshots-zip-summary-head">
-                  <strong>ZIP Özeti</strong>
-                  <span>
-                    {zipCompleteLocaleCount}/{zipLocaleKeys.length} locale tam
-                  </span>
-                </div>
-                <div className="screenshots-zip-summary-list">
-                  {zipLocaleSummary.map((entry) => (
-                    <div
-                      key={entry.locale}
-                      className={`screenshots-zip-summary-item${
-                        entry.locale === activeZipLocaleKey ? ' active' : ''
-                      }`}
-                    >
-                      <strong>{entry.locale}</strong>
-                      <span>
-                        {entry.isComplete
-                          ? '1-6 hazır'
-                          : `Eksik: ${entry.missingSlots.join(', ')}`}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            <label className="screenshot-file-field">
-              Screenshot Fallback
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/jpg"
-                disabled={isLocked}
-                onChange={(event) => {
-                  const nextFile = event.target.files?.[0] ?? null;
-                  handleSlotFileChange(nextFile);
-                  event.currentTarget.value = '';
-                }}
-              />
-            </label>
-
-            <div className="screenshot-file-meta">
-              {selectedZipEntry
-                ? `${activeZipLocaleKey}/${selectedZipEntry.fileName}`
-                : selectedSlotFile
-                ? `${selectedSlotFile.name} - ${formatFileSize(selectedSlotFile.size)}`
-                : 'Henüz dosya seçilmedi.'}
-            </div>
-            {selectedSlotPreviewError ? (
-              <div className="screenshot-file-error">{selectedSlotPreviewError}</div>
-            ) : null}
 
             <section className="screenshots-palette-panel">
               <button
@@ -3358,7 +3443,7 @@ export default function ScreenshotsDialog({
                 });
               }}
             >
-              {isBusy ? 'İşleniyor...' : zipLocaleKeys.length > 0 ? 'Screenshotları Üret' : '6 Screenshot Üret'}
+              {isBusy ? 'İşleniyor...' : 'Screenshotları Üret'}
             </Button>
           </div>
         </div>

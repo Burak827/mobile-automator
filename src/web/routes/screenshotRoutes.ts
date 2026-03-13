@@ -1,6 +1,6 @@
 import type express from 'express';
 import { mkdirSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { access, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import {
   translateWithOpenAI,
@@ -19,6 +19,7 @@ import type { RouteRegistrar } from '../serverHelpers.js';
 import {
   mustGetApp,
   parseBoolean,
+  parseJsonOrUndefined,
   parseScreenshotHeroCameraModeInput,
   parseScreenshotHeroCameraSettingsInput,
   parseScreenshotHeroKeyLightSettingsInput,
@@ -42,11 +43,15 @@ import {
   parseScreenshotStoreParam,
   resolveImageExtension,
   sanitizePathToken,
+  serializeScreenshotUploadBatchRecord,
   serializeScreenshotPresetRecord,
   serializeScreenshotTitleTranslationRecord,
   toNonEmptyString,
   toProjectRelativePath,
 } from '../serverHelpers.js';
+
+const DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE = 'APP_IPHONE_65';
+const GENERATED_SCREENSHOT_SLOTS = [1, 2, 3, 4, 5, 6] as const;
 
 async function translateWithRetry(
   args: Parameters<typeof translateWithOpenAI>[0],
@@ -199,6 +204,140 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
       res.json({
         appId,
         translations: records.map(serializeScreenshotTitleTranslationRecord),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/api/apps/:id/screenshots/upload-batches', (req, res, next) => {
+    try {
+      const appId = parseId(req.params.id);
+      mustGetApp(ctx.repo, appId);
+      const batches = ctx.repo.listScreenshotUploadBatches(appId).map((record) => ({
+        ...serializeScreenshotUploadBatchRecord(record),
+        outputRoot: toProjectRelativePath(
+          resolve(
+            process.cwd(),
+            'data',
+            'screenshots',
+            'output',
+            `app-${appId}`,
+            getScreenshotStorePathToken(record.store)
+          )
+        ),
+      }));
+      res.json({ appId, batches });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/api/apps/:id/screenshots/:store/upload-batch', async (req, res, next) => {
+    try {
+      const appId = parseId(req.params.id);
+      const appRow = mustGetApp(ctx.repo, appId);
+      const store = parseScreenshotStoreParam(req.params.store);
+      const batch = ctx.repo.getScreenshotUploadBatch(appId, store);
+      if (!batch) {
+        res.status(400).json({ error: 'Upload bekleyen screenshot batch bulunamadı.' });
+        return;
+      }
+
+      const localesRaw = parseJsonOrUndefined(batch.localesJson);
+      const locales = Array.isArray(localesRaw)
+        ? localesRaw
+            .filter((locale): locale is string => typeof locale === 'string')
+            .map((locale) => locale.trim())
+            .filter((locale) => locale.length > 0)
+            .sort((a, b) => a.localeCompare(b))
+        : [];
+      if (locales.length === 0) {
+        ctx.repo.deleteScreenshotUploadBatch(appId, store);
+        res.status(400).json({ error: 'Batch içinde locale bulunamadı.' });
+        return;
+      }
+
+      ctx.repo.markScreenshotUploadBatchUploading(appId, store);
+
+      const fileDiscovery = await Promise.all(
+        locales.map(async (locale) => ({
+          locale,
+          filePaths: await collectGeneratedScreenshotFilePaths(appId, store, locale),
+        }))
+      );
+
+      const readyLocaleFiles = fileDiscovery.filter((entry) => entry.filePaths.length === GENERATED_SCREENSHOT_SLOTS.length);
+      const preflightFailed = fileDiscovery
+        .filter((entry) => entry.filePaths.length !== GENERATED_SCREENSHOT_SLOTS.length)
+        .map((entry) => ({
+          locale: entry.locale,
+          error: `Eksik output bulundu (${entry.filePaths.length}/${GENERATED_SCREENSHOT_SLOTS.length}).`,
+        }));
+
+      const outputRoot = toProjectRelativePath(
+        resolve(
+          process.cwd(),
+          'data',
+          'screenshots',
+          'output',
+          `app-${appId}`,
+          getScreenshotStorePathToken(store)
+        )
+      );
+
+      if (readyLocaleFiles.length === 0) {
+        ctx.repo.markScreenshotUploadBatchFailed(
+          appId,
+          store,
+          'Upload için hazır locale bulunamadı.',
+          preflightFailed.map((entry) => entry.locale)
+        );
+        res.status(400).json({
+          appId,
+          store,
+          uploadedLocales: [],
+          failedLocales: preflightFailed,
+          outputRoot,
+          message: 'Upload için hazır locale bulunamadı.',
+        });
+        return;
+      }
+
+      const uploadResult =
+        store === 'ios'
+          ? await ctx.storeApi.uploadAppStoreGeneratedScreenshots({
+              app: appRow,
+              displayType: resolvePreferredAscScreenshotDisplayType(ctx.repo, appId),
+              localeFiles: readyLocaleFiles,
+            })
+          : await ctx.storeApi.uploadPlayStoreGeneratedScreenshots({
+              app: appRow,
+              localeFiles: readyLocaleFiles,
+            });
+
+      const failedLocales = [...preflightFailed, ...uploadResult.failed];
+      if (failedLocales.length > 0) {
+        ctx.repo.markScreenshotUploadBatchFailed(
+          appId,
+          store,
+          failedLocales.map((entry) => `${entry.locale}: ${entry.error}`).join(' | '),
+          failedLocales.map((entry) => entry.locale)
+        );
+      } else {
+        ctx.repo.deleteScreenshotUploadBatch(appId, store);
+      }
+
+      res.json({
+        appId,
+        store,
+        uploadedLocales: uploadResult.uploadedLocales,
+        failedLocales,
+        outputRoot,
+        message:
+          failedLocales.length === 0
+            ? `${getScreenshotStoreLabel(store)} screenshot upload tamamlandı (${uploadResult.uploadedLocales.length} locale).`
+            : `${getScreenshotStoreLabel(store)} screenshot upload kısmi tamamlandı (${uploadResult.uploadedLocales.length} başarılı, ${failedLocales.length} hatalı).`,
       });
     } catch (error) {
       next(error);
@@ -401,6 +540,61 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
   });
 };
 
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectGeneratedScreenshotFilePaths(
+  appId: number,
+  store: ScreenshotStore,
+  locale: string
+): Promise<string[]> {
+  const localeToken = sanitizePathToken(locale || 'en-US') || 'en-US';
+  const baseDir = resolve(
+    process.cwd(),
+    'data',
+    'screenshots',
+    'output',
+    `app-${appId}`,
+    getScreenshotStorePathToken(store),
+    localeToken
+  );
+  const files: string[] = [];
+  for (const slot of GENERATED_SCREENSHOT_SLOTS) {
+    const path = join(baseDir, `${slot}.png`);
+    if (await fileExists(path)) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
+function resolvePreferredAscScreenshotDisplayType(
+  repo: Parameters<RouteRegistrar>[1]['repo'],
+  appId: number
+): string {
+  const details = repo.listStoreLocaleDetails(appId, 'app_store');
+  for (const detail of details) {
+    const raw = parseJsonOrUndefined(detail.detailJson);
+    if (!raw || typeof raw !== 'object') continue;
+    const screenshots = (raw as Record<string, unknown>).screenshots;
+    if (!Array.isArray(screenshots)) continue;
+    for (const group of screenshots) {
+      const displayType =
+        group && typeof group === 'object'
+          ? toNonEmptyString((group as Record<string, unknown>).displayType)
+          : undefined;
+      if (displayType) return displayType;
+    }
+  }
+  return DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE;
+}
+
 async function handleScreenshotGenerateRequest(
   ctx: Parameters<RouteRegistrar>[1],
   req: express.Request,
@@ -511,6 +705,11 @@ async function handleScreenshotGenerateRequest(
     heroCameraMode,
     heroCameraSettings,
   });
+
+  const localeFilePaths = await collectGeneratedScreenshotFilePaths(appId, store, locale);
+  if (localeFilePaths.length === GENERATED_SCREENSHOT_SLOTS.length) {
+    ctx.repo.upsertScreenshotUploadBatch(appId, store, [locale]);
+  }
 
   res.status(201).json({
     appId,

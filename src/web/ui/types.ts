@@ -349,6 +349,31 @@ export type ScreenshotTitleTranslationResponse = {
   translation: ScreenshotTitleTranslationEntryPayload;
 };
 
+export type ScreenshotUploadBatchPayload = {
+  appId: number;
+  store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  status: "pending" | "uploading" | "failed";
+  locales: string[];
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+  outputRoot: string;
+};
+
+export type ScreenshotUploadBatchListResponse = {
+  appId: number;
+  batches: ScreenshotUploadBatchPayload[];
+};
+
+export type ScreenshotUploadBatchApplyResponse = {
+  appId: number;
+  store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  uploadedLocales: string[];
+  failedLocales: Array<{ locale: string; error: string }>;
+  outputRoot: string;
+  message: string;
+};
+
 export type StoreLocaleDetailPayload = {
   appId: number;
   store: StoreId;

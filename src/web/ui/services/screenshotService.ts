@@ -1,6 +1,8 @@
 import { api } from '../lib/api';
 import type {
   ScreenshotGenerateResponse,
+  ScreenshotUploadBatchApplyResponse,
+  ScreenshotUploadBatchListResponse,
   ScreenshotPresetListResponse,
   ScreenshotPresetResponse,
   ScreenshotTitleTranslationListResponse,
@@ -94,6 +96,25 @@ export async function saveScreenshotTitleTranslations(
     {
       method: 'PUT',
       body: JSON.stringify({ translations }),
+    }
+  );
+}
+
+export async function fetchScreenshotUploadBatches(
+  appId: number
+): Promise<ScreenshotUploadBatchListResponse> {
+  return api<ScreenshotUploadBatchListResponse>(`/api/apps/${appId}/screenshots/upload-batches`);
+}
+
+export async function uploadScreenshotBatch(
+  appId: number,
+  store: ScreenshotStore
+): Promise<ScreenshotUploadBatchApplyResponse> {
+  const endpointSegment = getScreenshotStoreEndpointSegment(store);
+  return api<ScreenshotUploadBatchApplyResponse>(
+    `/api/apps/${appId}/screenshots/${endpointSegment}/upload-batch`,
+    {
+      method: 'POST',
     }
   );
 }

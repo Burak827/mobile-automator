@@ -1,4 +1,6 @@
 import { AscClient, type QueryValue } from "../ascClient.js";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   AppStoreVersionAttributes,
   AppScreenshotSetAttributes,
@@ -188,7 +190,16 @@ type AscVersionResponse = {
 type ResolvedAscVersion = {
   versionId: string;
   versionString?: string;
+  appVersionState?: string;
 };
+
+const EDITABLE_ASC_VERSION_STATES = new Set([
+  "PREPARE_FOR_SUBMISSION",
+  "DEVELOPER_REJECTED",
+  "REJECTED",
+  "METADATA_REJECTED",
+  "INVALID_BINARY",
+]);
 
 type AscLocalizationListResponse = {
   data: Array<{
@@ -235,6 +246,45 @@ type AscScreenshotSetsResponse = {
     };
   }>;
   included?: Array<AscResource<AppScreenshotAttributes>>;
+};
+
+type AscAppStoreVersionLocalizationListResponse = {
+  data: Array<{
+    id: string;
+    attributes?: {
+      locale?: string;
+    };
+  }>;
+};
+
+type AscAppScreenshotListResponse = {
+  data: Array<{
+    id: string;
+    type: string;
+  }>;
+};
+
+type AscUploadOperation = {
+  method?: string;
+  url?: string;
+  offset?: number;
+  length?: number;
+  requestHeaders?: Array<{
+    name?: string;
+    value?: string;
+  }>;
+};
+
+type AscAppScreenshotCreateResponse = {
+  data?: {
+    id?: string;
+    attributes?: {
+      assetDeliveryState?: {
+        state?: string;
+      };
+      uploadOperations?: AscUploadOperation[];
+    };
+  };
 };
 
 function ascTemplateUrlToReal(templateUrl: string, width: number, height: number): string {
@@ -1047,6 +1097,82 @@ export class StoreApiService {
     return {
       versionId: latest.id,
       versionString,
+      appVersionState: latest.attributes?.appVersionState,
+    };
+  }
+
+  private async resolveLatestEditableAscVersion(
+    client: AscClient,
+    appId: string
+  ): Promise<ResolvedAscVersion> {
+    const response = await client.get<AscVersionResponse>(
+      `/v1/apps/${appId}/appStoreVersions`,
+      {
+        "fields[appStoreVersions]": [
+          "versionString",
+          "createdDate",
+          "appVersionState",
+          "platform",
+        ],
+        limit: 200,
+      }
+    );
+
+    if (!response.data.length) {
+      throw new Error("No App Store versions found for this app.");
+    }
+
+    const editable = response.data.filter((item) =>
+      EDITABLE_ASC_VERSION_STATES.has(item.attributes?.appVersionState ?? "")
+    );
+
+    if (editable.length === 0) {
+      const states = Array.from(
+        new Set(
+          response.data
+            .map((item) => item.attributes?.appVersionState?.trim())
+            .filter((state): state is string => Boolean(state))
+        )
+      ).sort();
+      throw new Error(
+        `Editable App Store version bulunamadı. Mevcut state'ler: ${states.join(", ")}`
+      );
+    }
+
+    let latest = editable[0]!;
+
+    for (const candidate of editable.slice(1)) {
+      const latestDate = latest.attributes?.createdDate
+        ? Date.parse(latest.attributes.createdDate)
+        : NaN;
+      const candidateDate = candidate.attributes?.createdDate
+        ? Date.parse(candidate.attributes.createdDate)
+        : NaN;
+
+      if (!Number.isNaN(candidateDate) && (Number.isNaN(latestDate) || candidateDate > latestDate)) {
+        latest = candidate;
+        continue;
+      }
+
+      const comparison = compareVersionStrings(
+        candidate.attributes?.versionString,
+        latest.attributes?.versionString
+      );
+      if (comparison !== null && comparison > 0) {
+        latest = candidate;
+      }
+    }
+
+    const rawVersionString = latest.attributes?.versionString;
+    const versionString =
+      typeof rawVersionString === "string" && rawVersionString.trim().length > 0
+        ? rawVersionString.trim()
+        : undefined;
+
+    return {
+      versionId: latest.id,
+      versionString,
+      appVersionState: latest.attributes?.appVersionState,
     };
   }
 
@@ -1915,6 +2041,282 @@ export class StoreApiService {
       await client.deleteEdit(packageName, editId).catch(() => {});
       throw error;
     }
+  }
+
+  private async resolveAscVersionLocalizationId(
+    client: AscClient,
+    versionId: string,
+    canonicalLocale: string
+  ): Promise<string> {
+    const storeLocale = toStoreLocale(canonicalLocale, "app_store");
+    const payload = await client.get<AscAppStoreVersionLocalizationListResponse>(
+      `/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`,
+      {
+        "fields[appStoreVersionLocalizations]": ["locale"],
+        limit: 200,
+      }
+    );
+    const localizationId = payload.data.find(
+      (row) => row.attributes?.locale === storeLocale
+    )?.id;
+    if (!localizationId) {
+      throw new Error(`App Store locale bulunamadı: ${canonicalLocale}`);
+    }
+    return localizationId;
+  }
+
+  private async ensureAscScreenshotSet(
+    client: AscClient,
+    versionLocalizationId: string,
+    displayType: string
+  ): Promise<string> {
+    const setsPayload = await client.get<AscScreenshotSetsResponse>(
+      `/v1/appStoreVersionLocalizations/${versionLocalizationId}/appScreenshotSets`,
+      {
+        "fields[appScreenshotSets]": ["screenshotDisplayType"],
+        limit: 200,
+      }
+    );
+    const existingId = setsPayload.data.find(
+      (item) => item.attributes?.screenshotDisplayType === displayType
+    )?.id;
+    if (existingId) return existingId;
+
+    const created = await client.post<{
+      data?: {
+        id?: string;
+      };
+    }>("/v1/appScreenshotSets", {
+      data: {
+        type: "appScreenshotSets",
+        attributes: {
+          screenshotDisplayType: displayType,
+        },
+        relationships: {
+          appStoreVersionLocalization: {
+            data: {
+              id: versionLocalizationId,
+              type: "appStoreVersionLocalizations",
+            },
+          },
+        },
+      },
+    });
+
+    const screenshotSetId = created.data?.id?.trim();
+    if (!screenshotSetId) {
+      throw new Error(`App Store screenshot set oluşturulamadı (${displayType}).`);
+    }
+    return screenshotSetId;
+  }
+
+  private async clearAscScreenshotSet(
+    client: AscClient,
+    screenshotSetId: string
+  ): Promise<void> {
+    const screenshotsPayload = await this.fetchAscPaginated<
+      NonNullable<AscAppScreenshotListResponse["data"]>[number]
+    >({
+      client,
+      path: `/v1/appScreenshotSets/${screenshotSetId}/appScreenshots`,
+      query: { limit: 200 },
+    });
+    for (const item of screenshotsPayload.data) {
+      if (!item.id) continue;
+      await client.delete(`/v1/appScreenshots/${item.id}`);
+    }
+  }
+
+  private async runAscUploadOperations(
+    uploadOperations: AscUploadOperation[],
+    fileBuffer: Buffer
+  ): Promise<void> {
+    for (const operation of uploadOperations) {
+      const url = operation.url?.trim();
+      if (!url) continue;
+      const offset = Math.max(0, Number(operation.offset ?? 0));
+      const requestedLength = Number(operation.length ?? fileBuffer.length - offset);
+      const length = Number.isFinite(requestedLength)
+        ? Math.max(0, Math.min(fileBuffer.length - offset, requestedLength))
+        : fileBuffer.length - offset;
+      const body = fileBuffer.subarray(offset, offset + length);
+      const headers = new Headers();
+      for (const header of operation.requestHeaders ?? []) {
+        const name = header.name?.trim();
+        const value = header.value?.trim();
+        if (!name || !value) continue;
+        headers.set(name, value);
+      }
+
+      const response = await fetch(url, {
+        method: operation.method?.trim() || "PUT",
+        headers,
+        body: new Uint8Array(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(
+          `ASC asset upload failed (${response.status} ${response.statusText})${text ? `: ${text}` : ""}`
+        );
+      }
+    }
+  }
+
+  private async uploadAscScreenshot(
+    client: AscClient,
+    screenshotSetId: string,
+    filePath: string
+  ): Promise<void> {
+    const fileBuffer = await readFile(filePath);
+    const fileName = filePath.split("/").pop() ?? "screenshot.png";
+    const sourceFileChecksum = createHash("md5").update(fileBuffer).digest("hex");
+
+    const created = await client.post<AscAppScreenshotCreateResponse>("/v1/appScreenshots", {
+      data: {
+        type: "appScreenshots",
+        attributes: {
+          fileName,
+          fileSize: fileBuffer.length,
+          sourceFileChecksum,
+        },
+        relationships: {
+          appScreenshotSet: {
+            data: {
+              id: screenshotSetId,
+              type: "appScreenshotSets",
+            },
+          },
+        },
+      },
+    });
+
+    const screenshotId = created.data?.id?.trim();
+    const uploadOperations = created.data?.attributes?.uploadOperations ?? [];
+    if (!screenshotId) {
+      throw new Error(`ASC screenshot oluşturulamadı: ${fileName}`);
+    }
+    if (!Array.isArray(uploadOperations) || uploadOperations.length === 0) {
+      throw new Error(`ASC upload operasyonu alınamadı: ${fileName}`);
+    }
+
+    await this.runAscUploadOperations(uploadOperations, fileBuffer);
+
+    await client.patch(`/v1/appScreenshots/${screenshotId}`, {
+      data: {
+        id: screenshotId,
+        type: "appScreenshots",
+        attributes: {
+          uploaded: true,
+        },
+      },
+    });
+  }
+
+  async uploadAppStoreGeneratedScreenshots(options: {
+    app: AppRecord;
+    displayType: string;
+    localeFiles: Array<{
+      locale: string;
+      filePaths: string[];
+    }>;
+  }): Promise<{
+    uploadedLocales: string[];
+    failed: Array<{ locale: string; error: string }>;
+  }> {
+    const ascAppId = options.app.ascAppId;
+    if (!ascAppId) throw new Error("ascAppId missing");
+
+    const client = this.resolveAscClient();
+    const { versionId } = await this.resolveLatestEditableAscVersion(client, ascAppId);
+    const uploadedLocales: string[] = [];
+    const failed: Array<{ locale: string; error: string }> = [];
+
+    for (const entry of options.localeFiles) {
+      try {
+        const localizationId = await this.resolveAscVersionLocalizationId(
+          client,
+          versionId,
+          entry.locale
+        );
+        const screenshotSetId = await this.ensureAscScreenshotSet(
+          client,
+          localizationId,
+          options.displayType
+        );
+        await this.clearAscScreenshotSet(client, screenshotSetId);
+        for (const filePath of entry.filePaths) {
+          await this.uploadAscScreenshot(client, screenshotSetId, filePath);
+        }
+        uploadedLocales.push(entry.locale);
+      } catch (error) {
+        failed.push({
+          locale: entry.locale,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return { uploadedLocales, failed };
+  }
+
+  async uploadPlayStoreGeneratedScreenshots(options: {
+    app: AppRecord;
+    localeFiles: Array<{
+      locale: string;
+      filePaths: string[];
+    }>;
+  }): Promise<{
+    uploadedLocales: string[];
+    failed: Array<{ locale: string; error: string }>;
+  }> {
+    const packageName = options.app.androidPackageName;
+    if (!packageName) throw new Error("androidPackageName missing");
+
+    const client = this.resolveGpcClient();
+    const editId = await client.createEdit(packageName);
+    const uploadedLocales: string[] = [];
+    const failed: Array<{ locale: string; error: string }> = [];
+
+    try {
+      for (const entry of options.localeFiles) {
+        const gpcLocale = toStoreLocale(entry.locale, "play_store");
+        try {
+          const existing = await client.get<GpcImagesListResponse>(
+            `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}/phoneScreenshots`
+          );
+          for (const image of existing.images ?? []) {
+            if (!image.id) continue;
+            await client.delete(
+              `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}/phoneScreenshots/${image.id}`
+            );
+          }
+
+          for (const filePath of entry.filePaths) {
+            const buffer = await readFile(filePath);
+            await client.uploadMedia(
+              `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}/phoneScreenshots?uploadType=media`,
+              buffer,
+              "image/png"
+            );
+          }
+
+          uploadedLocales.push(entry.locale);
+        } catch (error) {
+          failed.push({
+            locale: entry.locale,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      await client.commitEdit(packageName, editId);
+    } catch (error) {
+      await client.deleteEdit(packageName, editId).catch(() => {});
+      throw error;
+    }
+
+    return { uploadedLocales, failed };
   }
 
   /** @deprecated Use applyPlayStoreSingleLocale / deletePlayStoreSingleLocale for per-locale resilience */

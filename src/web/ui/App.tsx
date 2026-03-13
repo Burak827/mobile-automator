@@ -22,6 +22,7 @@ import { useScreenshotActions } from './hooks/useScreenshotActions';
 import { useSyncActions } from './hooks/useSyncActions';
 import { api, formatOutput } from './lib/api';
 import { fetchStoreTitleMap } from './services/localeService';
+import { uploadScreenshotBatch } from './services/screenshotService';
 import type {
   AppConfigField,
   AppConfigForm,
@@ -37,6 +38,7 @@ import type {
   PendingStoreLocaleChange,
   PendingValueMap,
   PlayStoreLocaleDetail,
+  ScreenshotUploadBatchPayload,
   StoreId,
   StoreIapEntry,
   StoreRuleSet,
@@ -93,6 +95,10 @@ type ChangeQueuePayload = {
   exportedAt?: string;
   changes?: unknown[];
 };
+
+function toScreenshotStoreFromStoreId(store: StoreId): 'ios' | 'play_store' {
+  return store === 'app_store' ? 'ios' : 'play_store';
+}
 
 function normalizeLocaleCatalog(rows: unknown): LocaleCatalogEntry[] {
   if (!Array.isArray(rows)) return [];
@@ -654,6 +660,7 @@ export default function App() {
   const [isGeneratingScreenshot, setIsGeneratingScreenshot] = useState(false);
   const [screenshotPresets, setScreenshotPresets] = useState<ScreenshotPresetMap>({});
   const [screenshotTitleTranslations, setScreenshotTitleTranslations] = useState<ScreenshotTitleTranslationsMap>({});
+  const [screenshotUploadBatches, setScreenshotUploadBatches] = useState<ScreenshotUploadBatchPayload[]>([]);
   const [appStoreIaps, setAppStoreIaps] = useState<StoreIapEntry[]>([]);
   const [playStoreIaps, setPlayStoreIaps] = useState<StoreIapEntry[]>([]);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
@@ -687,6 +694,7 @@ export default function App() {
     setPlayStoreIaps([]);
     setScreenshotPresets({});
     setScreenshotTitleTranslations({});
+    setScreenshotUploadBatches([]);
     setPendingStoreChanges({});
   }, []);
 
@@ -729,6 +737,7 @@ export default function App() {
   const {
     loadScreenshotPresets,
     loadScreenshotTitleTranslations,
+    loadScreenshotUploadBatches,
     handleOpenScreenshotsModal,
     handleSaveScreenshotPreset,
     handleSaveScreenshotTitleTranslations,
@@ -739,6 +748,7 @@ export default function App() {
     pushStatus,
     setScreenshotPresets,
     setScreenshotTitleTranslations,
+    setScreenshotUploadBatches,
     setIsScreenshotsOpen,
     setIsGeneratingScreenshot,
   });
@@ -772,9 +782,13 @@ export default function App() {
           setScreenshotTitleTranslations({});
           return {};
         }),
+        loadScreenshotUploadBatches(app.id).catch(() => {
+          setScreenshotUploadBatches([]);
+          return [];
+        }),
       ]);
     },
-    [loadIaps, loadScreenshotPresets, loadScreenshotTitleTranslations, loadStorePanels]
+    [loadIaps, loadScreenshotPresets, loadScreenshotTitleTranslations, loadScreenshotUploadBatches, loadStorePanels]
   );
 
   const loadApps = useCallback(
@@ -1875,6 +1889,10 @@ export default function App() {
       const iapEntries = allEntries.filter(
         (entry): entry is PendingStoreIapFieldChange => entry.kind === 'iap_field'
       );
+      const screenshotBatchTargets = screenshotUploadBatches.filter((batch) => {
+        if (!storeFilter) return true;
+        return toScreenshotStoreFromStoreId(storeFilter) === batch.store;
+      });
 
       // Find field-only updates: fields for locales that have no locale add/remove entry
       const localeActionKeys = new Set(localeEntries.map((e) => `${e.store}::${e.locale}`));
@@ -1886,7 +1904,12 @@ export default function App() {
         fieldOnlyByLocale.get(localeKey)!.push(fe);
       }
 
-      if (localeEntries.length === 0 && fieldOnlyByLocale.size === 0 && iapEntries.length === 0) {
+      if (
+        localeEntries.length === 0 &&
+        fieldOnlyByLocale.size === 0 &&
+        iapEntries.length === 0 &&
+        screenshotBatchTargets.length === 0
+      ) {
         pushStatus(
           storeFilter ? `${storeFilter} için değişiklik yok.` : 'Değişiklik yok.'
         );
@@ -1994,12 +2017,25 @@ export default function App() {
 
       setIsApplyingConfig(true);
       try {
-        pushStatus(`${changes.length + iapChanges.length} değişiklik uygulanıyor...`);
+        if (changes.length + iapChanges.length > 0) {
+          pushStatus(`${changes.length + iapChanges.length} metin değişikliği uygulanıyor...`);
+        }
 
-        const result = await api<ApplyResponse>(
-          `/api/apps/${selectedAppId}/locales/apply`,
-          { method: 'POST', body: JSON.stringify({ changes, iapChanges }) }
-        );
+        const result =
+          changes.length + iapChanges.length > 0
+            ? await api<ApplyResponse>(
+                `/api/apps/${selectedAppId}/locales/apply`,
+                { method: 'POST', body: JSON.stringify({ changes, iapChanges }) }
+              )
+            : {
+                succeeded: [],
+                failed: [],
+                iapSucceeded: [],
+                iapFailed: [],
+                iapRefreshErrors: [],
+                appStoreLocales: [],
+                playStoreLocales: [],
+              };
 
         const iapSucceeded = result.iapSucceeded ?? [];
         const iapFailed = result.iapFailed ?? [];
@@ -2055,6 +2091,38 @@ export default function App() {
           ...result.succeeded.map((s) => s.store),
           ...iapSucceeded.map((s) => s.store),
         ]);
+
+        for (const batch of screenshotBatchTargets) {
+          const targetStore = batch.store === 'ios' ? 'app_store' : 'play_store';
+          pushStatus(
+            `🖼 ${batch.store === 'ios' ? 'iOS' : 'Play Store'} screenshot upload başlatıldı (${batch.locales.length} locale).`
+          );
+          try {
+            const uploadResult = await uploadScreenshotBatch(selectedAppId, batch.store);
+            pushStatus(uploadResult.message);
+            for (const locale of uploadResult.uploadedLocales) {
+              pushStatus(`  Upload tamamlandı: ${locale}`);
+            }
+            for (const failedLocale of uploadResult.failedLocales) {
+              pushStatus(`  Upload hatası [${failedLocale.locale}]: ${failedLocale.error}`);
+            }
+            if (uploadResult.uploadedLocales.length > 0) {
+              succeededStores.add(targetStore);
+            }
+          } catch (error) {
+            pushStatus(
+              `Screenshot upload hatası (${batch.store}): ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          }
+        }
+
+        await loadScreenshotUploadBatches(selectedAppId).catch(() => {
+          setScreenshotUploadBatches([]);
+          return [];
+        });
+
         if (succeededStores.size > 0) {
           const storeScope =
             succeededStores.has('app_store') && succeededStores.has('play_store')
@@ -2072,7 +2140,15 @@ export default function App() {
         setIsApplyingConfig(false);
       }
     },
-    [meta?.storeRules, pendingStoreChanges, pushStatus, selectedAppId, syncAndRefresh]
+    [
+      loadScreenshotUploadBatches,
+      meta?.storeRules,
+      pendingStoreChanges,
+      pushStatus,
+      screenshotUploadBatches,
+      selectedAppId,
+      syncAndRefresh,
+    ]
   );
 
   return (
@@ -2186,6 +2262,7 @@ export default function App() {
         isOpen={isChangeDrawerOpen}
         isBusy={isApplyingConfig}
         changes={pendingChangeEntries}
+        screenshotBatches={screenshotUploadBatches}
         onToggle={() => setIsChangeDrawerOpen((prev) => !prev)}
         onClear={handleClearPendingChanges}
         onExport={handleExportChangeQueue}

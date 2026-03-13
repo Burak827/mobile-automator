@@ -7,8 +7,10 @@ import type {
   ScreenshotTitleTranslationGeneratePayload,
   ScreenshotTitleTranslationsMap,
 } from '../components/organisms/ScreenshotsDialog';
+import type { ScreenshotUploadBatchPayload } from '../types';
 import {
   fetchScreenshotPresets,
+  fetchScreenshotUploadBatches,
   fetchScreenshotTitleTranslations,
   generateScreenshot,
   saveScreenshotPreset,
@@ -20,6 +22,7 @@ export function useScreenshotActions(params: {
   pushStatus: (message: unknown) => void;
   setScreenshotPresets: Dispatch<SetStateAction<ScreenshotPresetMap>>;
   setScreenshotTitleTranslations: Dispatch<SetStateAction<ScreenshotTitleTranslationsMap>>;
+  setScreenshotUploadBatches: Dispatch<SetStateAction<ScreenshotUploadBatchPayload[]>>;
   setIsScreenshotsOpen: Dispatch<SetStateAction<boolean>>;
   setIsGeneratingScreenshot: Dispatch<SetStateAction<boolean>>;
 }) {
@@ -28,6 +31,7 @@ export function useScreenshotActions(params: {
     pushStatus,
     setScreenshotPresets,
     setScreenshotTitleTranslations,
+    setScreenshotUploadBatches,
     setIsScreenshotsOpen,
     setIsGeneratingScreenshot,
   } = params;
@@ -69,6 +73,13 @@ export function useScreenshotActions(params: {
     return nextTranslations;
   }, [setScreenshotTitleTranslations]);
 
+  const loadScreenshotUploadBatches = useCallback(async (appId: number) => {
+    const payload = await fetchScreenshotUploadBatches(appId);
+    const nextBatches = payload.batches ?? [];
+    setScreenshotUploadBatches(nextBatches);
+    return nextBatches;
+  }, [setScreenshotUploadBatches]);
+
   const handleOpenScreenshotsModal = useCallback(() => {
     if (!selectedAppId) return;
     void (async () => {
@@ -76,6 +87,7 @@ export function useScreenshotActions(params: {
         await Promise.all([
           loadScreenshotPresets(selectedAppId),
           loadScreenshotTitleTranslations(selectedAppId),
+          loadScreenshotUploadBatches(selectedAppId),
         ]);
       } catch (error) {
         pushStatus(error instanceof Error ? error.message : String(error));
@@ -83,7 +95,7 @@ export function useScreenshotActions(params: {
         setIsScreenshotsOpen(true);
       }
     })();
-  }, [loadScreenshotPresets, loadScreenshotTitleTranslations, pushStatus, selectedAppId, setIsScreenshotsOpen]);
+  }, [loadScreenshotPresets, loadScreenshotTitleTranslations, loadScreenshotUploadBatches, pushStatus, selectedAppId, setIsScreenshotsOpen]);
 
   const handleSaveScreenshotPreset = useCallback(async (
     store: ScreenshotDialogStartPayload['store'],
@@ -133,7 +145,7 @@ export function useScreenshotActions(params: {
     if (!selectedAppId) return undefined;
 
     pushStatus(
-      `✨ Screenshot title çevirileri oluşturuluyor (${payload.locales.length} locale, kaynak: ${payload.sourceLocale})`
+      `✨ Screenshot title çevirileri oluşturuluyor (${payload.locales.length} hedef locale, kaynak: ${payload.sourceLocale})`
     );
     pushStatus(`Doğrulama: ${(payload.verify ?? true) ? 'Açık' : 'Kapalı'}`);
 
@@ -188,7 +200,7 @@ export function useScreenshotActions(params: {
 
         const type = event.type as string;
         if (type === 'start') {
-          pushStatus(`${event.totalLocales} locale için screenshot title çevirisi başlayacak`);
+          pushStatus(`${event.totalLocales} hedef locale için screenshot title çevirisi başlayacak`);
         } else if (type === 'progress') {
           pushStatus(`  ${event.locale}: slot ${event.slot} çevrildi`);
         } else if (type === 'locale_done') {
@@ -357,6 +369,7 @@ export function useScreenshotActions(params: {
       }
 
       if (successCount > 0) {
+        await loadScreenshotUploadBatches(selectedAppId);
         pushStatus(`✅ ${successCount}/${slotsToGenerate.length} screenshot yazıldı.`);
       }
       if (successCount === slotsToGenerate.length && closeWhenDone) {
@@ -367,11 +380,12 @@ export function useScreenshotActions(params: {
     } finally {
       setIsGeneratingScreenshot(false);
     }
-  }, [pushStatus, selectedAppId, setIsGeneratingScreenshot, setIsScreenshotsOpen, setScreenshotPresets]);
+  }, [loadScreenshotUploadBatches, pushStatus, selectedAppId, setIsGeneratingScreenshot, setIsScreenshotsOpen, setScreenshotPresets]);
 
   return {
     loadScreenshotPresets,
     loadScreenshotTitleTranslations,
+    loadScreenshotUploadBatches,
     handleOpenScreenshotsModal,
     handleSaveScreenshotPreset,
     handleSaveScreenshotTitleTranslations,
