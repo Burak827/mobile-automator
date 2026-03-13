@@ -25,6 +25,7 @@ import {
   type ProceduralLightPosition,
 } from "./screenshotTemplates/proceduralDeviceConfig.js";
 import {
+  getDefaultSlotSbeSettings,
   resolveSlot1SbeSettings,
   type Slot1SbeSettings,
 } from "./screenshotTemplates/slot1Sbe.js";
@@ -44,6 +45,10 @@ import {
   type ScreenshotTitleTypography,
 } from "./screenshotTemplates/screenshotTitleTypography.js";
 import { resolveStoredScreenshotTitleExtraLineColorsMap } from "./screenshotTemplates/screenshotTitleColors.js";
+import {
+  resolveStoredScreenshotBackgroundSettingsMap,
+  type ScreenshotBackgroundSettings,
+} from "./screenshotTemplates/screenshotBackgroundSettings.js";
 
 // ---------------------------------------------------------------------------
 // Server context — shared dependencies injected into route modules
@@ -511,9 +516,37 @@ export function parseScreenshotSlotSbeSettingsInput(
   const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const legacy = parseScreenshotSlot1SbeSettingsInput(store, legacyValue);
   return {
-    1: parseScreenshotSlot1SbeSettingsInput(store, raw['1']) ?? legacy ?? resolveSlot1SbeSettings(),
-    2: parseScreenshotSlot1SbeSettingsInput(store, raw['2']) ?? legacy ?? resolveSlot1SbeSettings(),
+    1:
+      parseSlotSpecificSbeSettingsInput(1, raw['1']) ??
+      legacy ??
+      resolveSlot1SbeSettings(getDefaultSlotSbeSettings(1)),
+    2:
+      parseSlotSpecificSbeSettingsInput(2, raw['2']) ??
+      legacy ??
+      resolveSlot1SbeSettings(getDefaultSlotSbeSettings(2)),
   };
+}
+
+function parseSlotSpecificSbeSettingsInput(slot: 1 | 2, value: unknown): Slot1SbeSettings | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  return resolveSlot1SbeSettings({
+    ...getDefaultSlotSbeSettings(slot),
+    lineWidth: toOptionalNumber(raw.lineWidth),
+    lineColor: toOptionalString(raw.lineColor),
+    opacity: toOptionalNumber(raw.opacity),
+    scale: toOptionalNumber(raw.scale),
+    angleDeg: toOptionalNumber(raw.angleDeg),
+    copyCount: toOptionalNumber(raw.copyCount),
+    positionX: toOptionalNumber(raw.positionX),
+    positionY: toOptionalNumber(raw.positionY),
+    originX: toOptionalNumber(raw.originX),
+    originY: toOptionalNumber(raw.originY),
+    originZ: toOptionalNumber(raw.originZ),
+  });
 }
 
 export function parseScreenshotHeroCameraModeInput(
@@ -614,6 +647,12 @@ export function parseScreenshotSlotTitleTypographyInput(
   return parseStoredScreenshotSlotTitleTypography(store, value);
 }
 
+export function parseScreenshotSlotBackgroundSettingsInput(
+  value: unknown
+): Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings> {
+  return resolveStoredScreenshotBackgroundSettingsMap(value);
+}
+
 export function parseStoredScreenshotPresetConfig(
   store: ScreenshotStore,
   value: unknown
@@ -624,6 +663,7 @@ export function parseStoredScreenshotPresetConfig(
   slotTitleExtraLineColors: Record<ScreenshotTemplateSlot, string[]>;
   slotTitleLineGaps: Record<ScreenshotTemplateSlot, number>;
   slotTitleTypography: Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>;
+  slotBackgroundSettings: Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>;
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
@@ -642,6 +682,7 @@ export function parseStoredScreenshotPresetConfig(
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
+      slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
       heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, undefined),
       heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
@@ -662,6 +703,7 @@ export function parseStoredScreenshotPresetConfig(
     "slotTitleLineGaps" in raw ||
     "titleLineGap" in raw ||
     "slotTitleTypography" in raw ||
+    "slotBackgroundSettings" in raw ||
     "heroPhonePose" in raw ||
     "heroPhoneShape" in raw ||
     "heroPhoneLocation" in raw ||
@@ -680,6 +722,7 @@ export function parseStoredScreenshotPresetConfig(
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(raw.slotTitleExtraLineColors),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(raw.slotTitleLineGaps, raw.titleLineGap),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, raw.slotTitleTypography),
+      slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(raw.slotBackgroundSettings),
       heroPhonePose: parseScreenshotHeroPhonePoseInput(store, raw.heroPhonePose),
       heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, raw.heroPhoneShape),
       heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, raw.heroPhoneLocation),
@@ -703,6 +746,7 @@ export function parseStoredScreenshotPresetConfig(
     slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
     slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
     slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
+    slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
     heroPhonePose: parseScreenshotHeroPhonePoseInput(store, undefined),
     heroPhoneShape: parseScreenshotHeroPhoneShapeInput(store, undefined),
     heroPhoneLocation: parseScreenshotHeroPhoneLocationInput(store, undefined),
@@ -737,6 +781,7 @@ export function serializeScreenshotPresetRecord(record: {
     slotTitleExtraLineColors: config.slotTitleExtraLineColors,
     slotTitleLineGaps: config.slotTitleLineGaps,
     slotTitleTypography: config.slotTitleTypography,
+    slotBackgroundSettings: config.slotBackgroundSettings,
     heroPhonePose: config.heroPhonePose,
     heroPhoneShape: config.heroPhoneShape,
     heroPhoneLocation: config.heroPhoneLocation,

@@ -35,6 +35,8 @@ export type ProceduralDeviceProfile = {
   notchColor: string;
 };
 
+export type ProceduralIslandStyle = 'ios' | 'android-circle';
+
 export const DEFAULT_PROCEDURAL_DEVICE_PROFILE: ProceduralDeviceProfile = {
   bodyColor: '#3c4148',
   bodyMetalness: 0.22,
@@ -101,6 +103,7 @@ export function createProceduralDeviceGroup(input?: {
   screenshotTexture?: THREE.Texture | null;
   includeScreen?: boolean;
   includeIsland?: boolean;
+  islandStyle?: ProceduralIslandStyle;
 }): THREE.Group {
   const group = new THREE.Group();
   rebuildProceduralDeviceGroup(group, input);
@@ -117,6 +120,7 @@ export function rebuildProceduralDeviceGroup(
     screenshotTexture?: THREE.Texture | null;
     includeScreen?: boolean;
     includeIsland?: boolean;
+    islandStyle?: ProceduralIslandStyle;
   }
 ): void {
   clearObject3D(group);
@@ -130,6 +134,7 @@ export function rebuildProceduralDeviceGroup(
   };
   const includeScreen = input?.includeScreen ?? false;
   const includeIsland = input?.includeIsland ?? true;
+  const islandStyle = input?.islandStyle ?? 'ios';
 
   const bodyGeometry = createRoundedRectExtrudedGeometry(shape);
   const bodyMaterial = new THREE.MeshPhysicalMaterial({
@@ -175,12 +180,18 @@ export function rebuildProceduralDeviceGroup(
     group.add(screen);
 
     if (includeIsland) {
-      const islandWidth = Math.max(1, Math.min(shape.islandWidthMm, screenWidth));
-      const islandLength = Math.max(1, Math.min(shape.islandLengthMm, screenLength));
-      const islandRadius = Math.max(
-        0,
-        Math.min(shape.islandRadiusMm, islandWidth / 2, islandLength / 2)
-      );
+      const islandWidth =
+        islandStyle === 'android-circle'
+          ? Math.max(1, Math.min(shape.islandLengthMm, screenWidth, screenLength))
+          : Math.max(1, Math.min(shape.islandWidthMm, screenWidth));
+      const islandLength =
+        islandStyle === 'android-circle'
+          ? islandWidth
+          : Math.max(1, Math.min(shape.islandLengthMm, screenLength));
+      const islandRadius =
+        islandStyle === 'android-circle'
+          ? islandWidth / 2
+          : Math.max(0, Math.min(shape.islandRadiusMm, islandWidth / 2, islandLength / 2));
       const island = new THREE.Mesh(
         createRoundedRectPlaneGeometry(islandWidth, islandLength, islandRadius),
         new THREE.MeshBasicMaterial({
@@ -193,7 +204,7 @@ export function rebuildProceduralDeviceGroup(
       );
       island.position.set(
         0,
-        shape.lengthMm / 2 - insetY - islandLength * 0.8,
+        shape.lengthMm / 2 - insetY - islandLength * (islandStyle === 'android-circle' ? 1.15 : 0.8),
         screenFrontZ + PROCEDURAL_DEVICE_ISLAND_Z_OFFSET_MM
       );
       group.add(island);
@@ -332,6 +343,7 @@ export async function renderProceduralDeviceSceneToCanvas(input: {
   cameraSettings?: Partial<ProceduralCameraSettings> | null;
   profile?: Partial<ProceduralDeviceProfile> | null;
   includeIsland?: boolean;
+  islandStyle?: ProceduralIslandStyle;
   targetCanvas?: HTMLCanvasElement;
 }): Promise<HTMLCanvasElement> {
   const canvas = input.targetCanvas ?? document.createElement('canvas');
@@ -386,6 +398,7 @@ export async function renderProceduralDeviceSceneToCanvas(input: {
     screenshotTexture,
     includeScreen: true,
     includeIsland: input.includeIsland,
+    islandStyle: input.islandStyle,
   });
   scene.add(deviceGroup);
 

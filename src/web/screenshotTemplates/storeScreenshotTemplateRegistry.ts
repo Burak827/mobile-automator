@@ -25,14 +25,16 @@ export type ScreenshotTemplatePaletteField = {
 };
 
 const IOS_HERO_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
-  { key: 'accent', label: 'Background', description: 'Hero arka plan tonu.' },
+  { key: 'accent', label: 'BG Accent', description: 'Hero arka plan vurgusu.' },
+  { key: 'cream', label: 'BG White', description: 'Hero arka plan acik tonu.' },
   { key: 'bgInk', label: 'Title', description: 'Başlık ana rengi.' },
   { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
 ];
 
 const IOS_POSTER_PALETTE_FIELDS: ScreenshotTemplatePaletteField[] = [
-  { key: 'accent', label: 'Background', description: 'Poster arka plan tonu.' },
-  { key: 'cream', label: 'Title', description: 'Başlık ana rengi.' },
+  { key: 'accent', label: 'BG Accent', description: 'Poster arka plan vurgusu.' },
+  { key: 'cream', label: 'BG White', description: 'Poster arka plan acik tonu.' },
+  { key: 'bgInk', label: 'Title', description: 'Başlık ana rengi.' },
   { key: 'phoneColor', label: 'Phone', description: 'Telefon gövde rengi.' },
 ];
 

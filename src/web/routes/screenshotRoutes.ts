@@ -22,6 +22,7 @@ import {
   parseScreenshotHeroPhonePoseInput,
   parseScreenshotHeroPhoneShapeInput,
   parseScreenshotPaletteInput,
+  parseScreenshotSlotBackgroundSettingsInput,
   parseScreenshotSlotPalettesInput,
   parseScreenshotSlotSbeSettingsInput,
   parseScreenshotSlot1SbeSettingsInput,
@@ -68,6 +69,9 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         body.titleLineGap
       );
       const slotTitleTypography = parseScreenshotSlotTitleTypographyInput(store, body.slotTitleTypography);
+      const slotBackgroundSettings = parseScreenshotSlotBackgroundSettingsInput(
+        body.slotBackgroundSettings
+      );
       const heroPhonePose = parseScreenshotHeroPhonePoseInput(store, body.heroPhonePose);
       const heroPhoneShape = parseScreenshotHeroPhoneShapeInput(store, body.heroPhoneShape);
       const heroPhoneLocation = parseScreenshotHeroPhoneLocationInput(store, body.heroPhoneLocation);
@@ -94,6 +98,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         slotTitleExtraLineColors,
         slotTitleLineGaps,
         slotTitleTypography,
+        slotBackgroundSettings,
         heroPhonePose,
         heroPhoneShape,
         heroPhoneLocation,
@@ -152,6 +157,9 @@ async function handleScreenshotGenerateRequest(
     body.titleLineGap
   );
   const slotTitleTypography = parseScreenshotSlotTitleTypographyInput(store, body.slotTitleTypography);
+  const slotBackgroundSettings = parseScreenshotSlotBackgroundSettingsInput(
+    body.slotBackgroundSettings
+  );
   const heroPhonePose = parseScreenshotHeroPhonePoseInput(store, body.heroPhonePose);
   const heroPhoneShape = parseScreenshotHeroPhoneShapeInput(store, body.heroPhoneShape);
   const heroPhoneLocation = parseScreenshotHeroPhoneLocationInput(store, body.heroPhoneLocation);
@@ -225,6 +233,7 @@ async function handleScreenshotGenerateRequest(
     slotTitleExtraLineColors,
     slotTitleLineGaps,
     slotTitleTypography,
+    slotBackgroundSettings,
     heroPhonePose,
     heroPhoneShape,
     heroPhoneLocation,
@@ -248,6 +257,7 @@ async function handleScreenshotGenerateRequest(
     heroKeyLightPosition,
     heroKeyLightSettings,
     slotSbeSettings,
+    slotBackgroundSettings,
     heroCameraMode,
     heroCameraSettings,
     stagedInputPath: toProjectRelativePath(stagedInputPath),

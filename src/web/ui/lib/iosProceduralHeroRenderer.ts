@@ -30,6 +30,10 @@ import {
   drawIosSplitHeroSharedDecor,
   type ScreenshotCanvasImageLoader,
 } from '../../screenshotTemplates/storeScreenshotCanvas';
+import {
+  resolveScreenshotBackgroundSettings,
+  type ScreenshotBackgroundSettings,
+} from '../../screenshotTemplates/screenshotBackgroundSettings';
 import type { ScreenshotStore } from '../../screenshotTemplates/screenshotStores';
 import {
   resolveSlot1SbeSettings,
@@ -55,6 +59,7 @@ import {
   getProceduralActiveCamera,
   renderProceduralDeviceSceneToCanvas,
   rebuildProceduralDeviceGroup,
+  type ProceduralIslandStyle,
 } from './proceduralDeviceThree';
 
 type RenderInput = {
@@ -64,6 +69,7 @@ type RenderInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette: ScreenshotTemplatePalette;
   screenshotUrl: string;
   imageLoader: ScreenshotCanvasImageLoader;
@@ -101,6 +107,10 @@ function getDeviceProfile(palette?: ScreenshotTemplatePalette | null) {
   return {
     bodyColor: palette?.phoneColor || DEFAULT_PHONE_COLOR,
   };
+}
+
+function getProceduralIslandStyle(store: ScreenshotStore): ProceduralIslandStyle {
+  return store === 'ios' ? 'ios' : 'android-circle';
 }
 const HERO_BASE_LOCATION = {
   ...DEFAULT_PROCEDURAL_DEVICE_LOCATION,
@@ -141,6 +151,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
     titleLines.length,
     input.titleExtraLineColors
   );
+  const backgroundSettings = resolveScreenshotBackgroundSettings(input.backgroundSettings);
 
   if (input.store === 'play_store') {
     drawPlayStoreSplitHeroBackdrop(finalCtx, {
@@ -149,6 +160,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      backgroundSettings,
       palette: input.palette,
       slot1SbeSettings:
         input.slot === 1 || input.slot === 2 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
@@ -162,6 +174,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      backgroundSettings,
       palette: input.palette,
       slot1SbeSettings:
         input.slot === 1 || input.slot === 2 ? resolveSlot1SbeSettings(input.slot1SbeSettings) : null,
@@ -236,6 +249,7 @@ export async function renderIosProceduralPosterComposite(input: {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette: ScreenshotTemplatePalette;
   screenshotUrl: string;
   imageLoader: ScreenshotCanvasImageLoader;
@@ -261,12 +275,14 @@ export async function renderIosProceduralPosterComposite(input: {
     titleLines.length,
     input.titleExtraLineColors
   );
+  const backgroundSettings = resolveScreenshotBackgroundSettings(input.backgroundSettings);
   const backdropInput = {
     slot: input.slot,
     titleLines,
     titleTypography: posterTitleTypography,
     titleLineColors: posterTitleLineColors,
     titleLineGap: input.titleLineGap,
+    backgroundSettings,
     palette: input.palette,
     width: input.width,
     height: input.height,
@@ -287,7 +303,8 @@ export async function renderIosProceduralPosterComposite(input: {
     location: POSTER_DEVICE_LOCATION,
     cameraMode: 'orthographic',
     profile: getDeviceProfile(input.palette),
-    includeIsland: input.store === 'ios',
+    includeIsland: true,
+    islandStyle: getProceduralIslandStyle(input.store),
   });
 
   finalCtx.drawImage(
@@ -378,7 +395,8 @@ async function renderHeroSceneOneShot(input: {
     profile: input.deviceProfile,
     screenshotTexture,
     includeScreen: true,
-    includeIsland: input.store === 'ios',
+    includeIsland: true,
+    islandStyle: getProceduralIslandStyle(input.store),
   });
   scene.add(deviceGroup);
 
@@ -457,7 +475,8 @@ async function renderHeroSceneWithRuntime(
       profile: input.deviceProfile,
       screenshotTexture,
       includeScreen: true,
-      includeIsland: input.store === 'ios',
+      includeIsland: true,
+      islandStyle: getProceduralIslandStyle(input.store),
     });
     runtime.shapeKey = nextShapeKey;
     runtime.screenshotUrl = input.screenshotUrl;
@@ -505,6 +524,8 @@ function createHeroRuntime(sceneWidth: number, height: number): HeroRuntime {
   const orthographicCamera = new THREE.OrthographicCamera(-240, 240, 240, -240, 0.1, 5000);
   const deviceGroup = createProceduralDeviceGroup({
     includeScreen: true,
+    includeIsland: true,
+    islandStyle: 'ios',
   });
   scene.add(deviceGroup);
 

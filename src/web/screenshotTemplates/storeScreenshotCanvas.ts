@@ -23,6 +23,10 @@ import {
 } from './screenshotTitleTypography.js';
 import { resolveScreenshotTitleLineColors } from './screenshotTitleColors.js';
 import {
+  resolveScreenshotBackgroundSettings,
+  type ScreenshotBackgroundSettings,
+} from './screenshotBackgroundSettings.js';
+import {
   SLOT_1_SBE_ORIGIN,
   SLOT_1_SBE_PATH_D,
   resolveSlot1SbeSettings,
@@ -56,6 +60,7 @@ export type StoreScreenshotCanvasInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette?: Partial<ScreenshotTemplatePalette> | null;
   screenshotSource?: ScreenshotCanvasImageSource;
   iosHeroOverlaySource?: string | null;
@@ -87,6 +92,7 @@ export async function drawStoreScreenshotToContext(
     titleLines.length,
     input.titleExtraLineColors
   );
+  const backgroundSettings = resolveScreenshotBackgroundSettings(input.backgroundSettings);
   const screenshotImage = input.screenshotSource
     ? await loadImage(input.screenshotSource)
     : null;
@@ -104,6 +110,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      backgroundSettings,
       palette,
       screenshotImage,
       iosHeroOverlayImage,
@@ -120,6 +127,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      backgroundSettings,
       palette,
       screenshotImage,
       heroPhonePose: input.heroPhonePose,
@@ -144,6 +152,7 @@ function drawIosFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     iosHeroOverlayImage: any;
@@ -170,6 +179,7 @@ function drawIosSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     iosHeroOverlayImage: any;
@@ -186,6 +196,7 @@ function drawIosSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    backgroundSettings: input.backgroundSettings,
     palette: input.palette,
     slot1SbeSettings: input.slot1SbeSettings,
     width: input.width,
@@ -227,6 +238,7 @@ export function drawIosSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
@@ -234,7 +246,13 @@ export function drawIosSplitHeroBackdrop(
   }
 ): void {
   const { palette, width, height } = input;
-  const background = createHeroBackgroundGradient(ctx, palette.accent, height);
+  const background = createHeroBackgroundGradient(
+    ctx,
+    palette.accent,
+    palette.cream,
+    height,
+    input.backgroundSettings
+  );
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
@@ -301,6 +319,7 @@ function drawIosPoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
@@ -325,6 +344,7 @@ function drawIosPoster(
     screenshotImage: input.screenshotImage,
     heroPhoneShape: input.heroPhoneShape,
     includeIsland: true,
+    islandStyle: 'ios',
   });
 }
 
@@ -336,13 +356,20 @@ export function drawIosPosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     width: number;
     height: number;
   }
 ): void {
   const { palette, width, height } = input;
-  ctx.fillStyle = palette.accent;
+  ctx.fillStyle = createHeroBackgroundGradient(
+    ctx,
+    palette.accent,
+    palette.cream,
+    height,
+    input.backgroundSettings
+  );
   ctx.fillRect(0, 0, width, height);
 
   drawTitleBlock(ctx, {
@@ -355,7 +382,7 @@ export function drawIosPosterBackdrop(
     lineGap: resolveTitleLineGap(input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
-    color: palette.cream,
+    color: palette.bgInk,
   });
 }
 
@@ -367,6 +394,7 @@ function drawPlayStoreFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     heroPhonePose?: Partial<IosHeroPhonePose> | null;
@@ -391,6 +419,7 @@ function drawPlayStoreSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     heroPhonePose?: Partial<IosHeroPhonePose> | null;
@@ -405,6 +434,7 @@ function drawPlayStoreSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    backgroundSettings: input.backgroundSettings,
     palette: input.palette,
     slot1SbeSettings: input.slot1SbeSettings,
     width: input.width,
@@ -446,6 +476,7 @@ export function drawPlayStoreSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     slot1SbeSettings?: Partial<Slot1SbeSettings> | null;
     width: number;
@@ -453,7 +484,13 @@ export function drawPlayStoreSplitHeroBackdrop(
   }
 ): void {
   const { palette, width, height } = input;
-  const background = createHeroBackgroundGradient(ctx, palette.accent, height);
+  const background = createHeroBackgroundGradient(
+    ctx,
+    palette.accent,
+    palette.cream,
+    height,
+    input.backgroundSettings
+  );
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
@@ -494,6 +531,7 @@ function drawPlayStorePoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     screenshotImage: any;
     width: number;
@@ -517,7 +555,8 @@ function drawPlayStorePoster(
     height: phoneHeight,
     palette: input.palette,
     screenshotImage: input.screenshotImage,
-    includeIsland: false,
+    includeIsland: true,
+    islandStyle: 'android-circle',
   });
 }
 
@@ -529,13 +568,20 @@ export function drawPlayStorePosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
     width: number;
     height: number;
   }
 ): void {
   const { palette, width, height } = input;
-  ctx.fillStyle = palette.accent;
+  ctx.fillStyle = createHeroBackgroundGradient(
+    ctx,
+    palette.accent,
+    palette.cream,
+    height,
+    input.backgroundSettings
+  );
   ctx.fillRect(0, 0, width, height);
 
   drawTitleBlock(ctx, {
@@ -548,7 +594,7 @@ export function drawPlayStorePosterBackdrop(
     lineGap: resolveTitleLineGap(input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
-    color: palette.cream,
+    color: palette.bgInk,
   });
 }
 
@@ -614,6 +660,7 @@ function drawPosterPhone(
     screenshotImage: any;
     heroPhoneShape?: Partial<IosHeroPhoneShape> | null;
     includeIsland?: boolean;
+    islandStyle?: 'ios' | 'android-circle';
   }
 ): void {
   const { x, y, width, height, palette, screenshotImage } = input;
@@ -663,24 +710,41 @@ function drawPosterPhone(
   if (input.includeIsland) {
     const screenWidthMm = Math.max(1, resolvedShape.widthMm - 4);
     const screenLengthMm = Math.max(1, resolvedShape.lengthMm - 4);
-    const islandWidth = Math.max(
-      1,
-      Math.min(screenWidth, screenWidth * (resolvedShape.islandWidthMm / screenWidthMm))
-    );
-    const islandLength = Math.max(
-      1,
-      Math.min(screenHeight, screenHeight * (resolvedShape.islandLengthMm / screenLengthMm))
-    );
-    const islandRadius = Math.max(
-      0,
-      Math.min(
-        islandWidth / 2,
-        islandLength / 2,
-        screenWidth * (resolvedShape.islandRadiusMm / screenWidthMm)
-      )
-    );
+    const islandStyle = input.islandStyle ?? 'ios';
+    const islandWidth =
+      islandStyle === 'android-circle'
+        ? Math.max(
+            1,
+            Math.min(
+              screenWidth,
+              screenHeight,
+              screenHeight * (resolvedShape.islandLengthMm / screenLengthMm)
+            )
+          )
+        : Math.max(
+            1,
+            Math.min(screenWidth, screenWidth * (resolvedShape.islandWidthMm / screenWidthMm))
+          );
+    const islandLength =
+      islandStyle === 'android-circle'
+        ? islandWidth
+        : Math.max(
+            1,
+            Math.min(screenHeight, screenHeight * (resolvedShape.islandLengthMm / screenLengthMm))
+          );
+    const islandRadius =
+      islandStyle === 'android-circle'
+        ? islandWidth / 2
+        : Math.max(
+            0,
+            Math.min(
+              islandWidth / 2,
+              islandLength / 2,
+              screenWidth * (resolvedShape.islandRadiusMm / screenWidthMm)
+            )
+          );
     const islandX = screenX + (screenWidth - islandWidth) / 2;
-    const islandY = screenY + islandLength * 0.3;
+    const islandY = screenY + islandLength * (islandStyle === 'android-circle' ? 0.7 : 0.3);
     fillRoundedRect(ctx, islandX, islandY, islandWidth, islandLength, islandRadius, '#06080b');
   }
 }
@@ -814,12 +878,25 @@ function drawSoftShadow(
   ctx.restore();
 }
 
-function createHeroBackgroundGradient(ctx: any, accentHex: string, height: number): any {
+function createHeroBackgroundGradient(
+  ctx: any,
+  accentHex: string,
+  whiteHex: string,
+  height: number,
+  settings: ScreenshotBackgroundSettings
+): any {
   const accentRgb = hexToRgb(accentHex);
+  const whiteRgb = hexToRgb(whiteHex);
   const background = ctx.createLinearGradient(0, 0, 0, height);
-  background.addColorStop(0, rgba(mixRgb(accentRgb, { r: 255, g: 255, b: 255 }, 0.9), 1));
-  background.addColorStop(0.46, rgba(mixRgb(accentRgb, { r: 247, g: 242, b: 237 }, 0.84), 1));
-  background.addColorStop(1, rgba(mixRgb(accentRgb, { r: 239, g: 233, b: 226 }, 0.8), 1));
+  background.addColorStop(settings.topStop, rgba(whiteRgb, 1));
+  background.addColorStop(
+    settings.midStop,
+    rgba(mixRgb(accentRgb, whiteRgb, settings.midMix), 1)
+  );
+  background.addColorStop(
+    settings.bottomStop,
+    rgba(mixRgb(accentRgb, whiteRgb, settings.bottomMix), 1)
+  );
   return background;
 }
 

@@ -44,7 +44,15 @@ import {
   type ScreenshotSlotTitleExtraLineColorsMap,
 } from '../../../screenshotTemplates/screenshotTitleColors';
 import {
+  createDefaultScreenshotBackgroundSettingsMap,
+  resolveScreenshotBackgroundSettings,
+  resolveStoredScreenshotBackgroundSettingsMap,
+  type ScreenshotBackgroundSettings,
+  type ScreenshotSlotBackgroundSettingsMap,
+} from '../../../screenshotTemplates/screenshotBackgroundSettings';
+import {
   DEFAULT_SLOT_1_SBE_SETTINGS,
+  getDefaultSlotSbeSettings,
   resolveSlot1SbeSettings,
   type Slot1SbeSettings,
 } from '../../../screenshotTemplates/slot1Sbe';
@@ -98,6 +106,7 @@ export type ScreenshotDialogStartPayload = {
   slotTitleLineGaps: Partial<Record<ScreenshotTemplateSlot, number>>;
   titleTypography: ScreenshotTitleTypography;
   slotTitleTypography: Partial<Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>>;
+  slotBackgroundSettings: Partial<Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>>;
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
@@ -116,6 +125,7 @@ export type ScreenshotPresetConfig = {
   slotTitleExtraLineColors?: Partial<Record<ScreenshotTemplateSlot, string[]>>;
   slotTitleLineGaps?: Partial<Record<ScreenshotTemplateSlot, number>>;
   slotTitleTypography?: Partial<Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>>;
+  slotBackgroundSettings?: Partial<Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>>;
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
   heroPhoneLocation: ProceduralDeviceLocation | null;
@@ -147,6 +157,7 @@ type PreviewCardProps = {
   titleTypography: ScreenshotTitleTypography;
   titleExtraLineColors: string[];
   titleLineGap: number;
+  backgroundSettings: ScreenshotBackgroundSettings;
   palette: ScreenshotTemplatePalette;
   heroPhonePose: IosHeroPhonePose | null;
   heroPhoneShape: IosHeroPhoneShape | null;
@@ -164,10 +175,11 @@ type PreviewCardProps = {
   onSelect: (slot: ScreenshotTemplateSlot) => void;
 };
 
-type PanelKey = 'rotation' | 'color' | 'shape' | 'location' | 'light' | 'sbe';
+type PanelKey = 'rotation' | 'color' | 'background' | 'shape' | 'location' | 'light' | 'sbe';
 type ScreenshotSlotTitleMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPaletteMap = Record<ScreenshotTemplateSlot, ScreenshotTemplatePalette>;
 type ScreenshotSlotTitleLineGapMap = Record<ScreenshotTemplateSlot, number>;
+type ScreenshotSlotBackgroundSettingsStateMap = Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>;
 type ScreenshotSlotFileMap = Record<ScreenshotTemplateSlot, File | null>;
 type ScreenshotSlotPreviewUrlMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPreviewErrorMap = Record<ScreenshotTemplateSlot, string>;
@@ -262,8 +274,8 @@ function createEmptySlotPreviewErrorMap(): ScreenshotSlotPreviewErrorMap {
 
 function createDefaultSlotSbeMap(): ScreenshotSlotSbeMap {
   return {
-    1: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
-    2: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+    1: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(1)),
+    2: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(2)),
   };
 }
 
@@ -307,6 +319,12 @@ function createSlotPaletteMap(
   }
 
   return next;
+}
+
+function createSlotBackgroundSettingsMap(
+  preset?: ScreenshotPresetConfig
+): ScreenshotSlotBackgroundSettingsStateMap {
+  return resolveStoredScreenshotBackgroundSettingsMap(preset?.slotBackgroundSettings);
 }
 
 function getScreenshotDraftStorageKey(appId: number, store: ScreenshotStore): string {
@@ -357,6 +375,7 @@ function mergeScreenshotPresetConfig(
     slotTitleExtraLineColors: draft.slotTitleExtraLineColors ?? base.slotTitleExtraLineColors,
     slotTitleLineGaps: draft.slotTitleLineGaps ?? base.slotTitleLineGaps,
     slotTitleTypography: draft.slotTitleTypography ?? base.slotTitleTypography,
+    slotBackgroundSettings: draft.slotBackgroundSettings ?? base.slotBackgroundSettings,
     heroPhonePose: draft.heroPhonePose ?? base.heroPhonePose,
     heroPhoneShape: draft.heroPhoneShape ?? base.heroPhoneShape,
     heroPhoneLocation: draft.heroPhoneLocation ?? base.heroPhoneLocation,
@@ -385,6 +404,13 @@ function getSlotPaletteTargetsForKey(
 }
 
 function getSlotScreenshotTargets(slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
+  if (slot === 1 || slot === 2) {
+    return [1, 2];
+  }
+  return [slot];
+}
+
+function getSlotBackgroundSettingsTargets(slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
   if (slot === 1 || slot === 2) {
     return [1, 2];
   }
@@ -434,6 +460,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
   titleTypography,
   titleExtraLineColors,
   titleLineGap,
+  backgroundSettings,
   palette,
   heroPhonePose,
   heroPhoneShape,
@@ -475,6 +502,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
         titleTypography,
         titleExtraLineColors,
         titleLineGap,
+        backgroundSettings,
         palette,
         screenshotUrl,
         imageLoader,
@@ -505,6 +533,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
         titleTypography,
         titleExtraLineColors,
         titleLineGap,
+        backgroundSettings,
         palette,
         heroPhonePose,
         heroPhoneShape,
@@ -516,7 +545,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
     }
 
     return () => { /* renderIdRef check guards stale renders */ };
-  }, [fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleExtraLineColors, titleLineGap, titleTypography]);
+  }, [backgroundSettings, fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleExtraLineColors, titleLineGap, titleTypography]);
 
   return (
     <button
@@ -567,6 +596,12 @@ export default function ScreenshotsDialog({
   >({
     ios: createEmptyScreenshotTitleExtraLineColorsMap(),
     play_store: createEmptyScreenshotTitleExtraLineColorsMap(),
+  });
+  const [backgroundSettingsByStore, setBackgroundSettingsByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotBackgroundSettingsStateMap>
+  >({
+    ios: createDefaultScreenshotBackgroundSettingsMap(),
+    play_store: createDefaultScreenshotBackgroundSettingsMap(),
   });
   const [filesByStore, setFilesByStore] = useState<Record<ScreenshotStore, ScreenshotSlotFileMap>>({
     ios: createEmptySlotFileMap(),
@@ -626,6 +661,7 @@ export default function ScreenshotsDialog({
   const [panelState, setPanelState] = useState({
     rotation: false,
     color: false,
+    background: false,
     shape: false,
     location: false,
     light: false,
@@ -647,6 +683,7 @@ export default function ScreenshotsDialog({
       slotTitleExtraLineColors: createEmptyScreenshotTitleExtraLineColorsMap(),
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
       slotTitleTypography: createSlotTitleTypographyMap('ios'),
+      slotBackgroundSettings: createDefaultScreenshotBackgroundSettingsMap(),
       heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
       heroPhoneShape: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios')),
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
@@ -663,6 +700,7 @@ export default function ScreenshotsDialog({
       slotTitleExtraLineColors: createEmptyScreenshotTitleExtraLineColorsMap(),
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
       slotTitleTypography: createSlotTitleTypographyMap('play_store'),
+      slotBackgroundSettings: createDefaultScreenshotBackgroundSettingsMap(),
       heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
       heroPhoneShape: resolveProceduralDeviceShapeForStore(
         'play_store',
@@ -715,6 +753,14 @@ export default function ScreenshotsDialog({
       ios: { ...sharedSlotTitleTypography },
       play_store: { ...sharedSlotTitleTypography },
     };
+    const sharedSlotBackgroundSettings = createSlotBackgroundSettingsMap(sharedPresetSource);
+    const nextSlotBackgroundSettings: Record<
+      ScreenshotStore,
+      ScreenshotSlotBackgroundSettingsStateMap
+    > = {
+      ios: { ...sharedSlotBackgroundSettings },
+      play_store: { ...sharedSlotBackgroundSettings },
+    };
     const sharedTitleLineGap = createSlotTitleLineGapMap(sharedPresetSource);
     const nextTitleLineGap: Record<ScreenshotStore, ScreenshotSlotTitleLineGapMap> = {
       ios: { ...sharedTitleLineGap },
@@ -766,6 +812,7 @@ export default function ScreenshotsDialog({
     setTitleLineGapByStore(nextTitleLineGap);
     setTitleExtraLineColorsByStore(nextSlotTitleExtraLineColors);
     setTitleTypographyByStore(nextSlotTitleTypography);
+    setBackgroundSettingsByStore(nextSlotBackgroundSettings);
     setFilesByStore({
       ios: createEmptySlotFileMap(),
       play_store: createEmptySlotFileMap(),
@@ -790,6 +837,7 @@ export default function ScreenshotsDialog({
     setPanelState({
       rotation: false,
       color: false,
+      background: false,
       shape: false,
       location: false,
       light: false,
@@ -803,6 +851,7 @@ export default function ScreenshotsDialog({
         slotTitleExtraLineColors: nextSlotTitleExtraLineColors.ios,
         slotTitleLineGaps: nextTitleLineGap.ios,
         slotTitleTypography: nextSlotTitleTypography.ios,
+        slotBackgroundSettings: nextSlotBackgroundSettings.ios,
         heroPhonePose: nextHeroPhonePose.ios,
         heroPhoneShape: nextHeroPhoneShape.ios,
         heroPhoneLocation: nextHeroPhoneLocation.ios,
@@ -819,6 +868,7 @@ export default function ScreenshotsDialog({
         slotTitleExtraLineColors: nextSlotTitleExtraLineColors.play_store,
         slotTitleLineGaps: nextTitleLineGap.play_store,
         slotTitleTypography: nextSlotTitleTypography.play_store,
+        slotBackgroundSettings: nextSlotBackgroundSettings.play_store,
         heroPhonePose: nextHeroPhonePose.play_store,
         heroPhoneShape: nextHeroPhoneShape.play_store,
         heroPhoneLocation: nextHeroPhoneLocation.play_store,
@@ -877,6 +927,10 @@ export default function ScreenshotsDialog({
     [resolvedPalette, resolvedTitleLines.length, slot, store, titleExtraLineColorsByStore]
   );
   const resolvedTitleLineGap = titleLineGapByStore[store]?.[slot] ?? 0;
+  const resolvedBackgroundSettings = useMemo(
+    () => resolveScreenshotBackgroundSettings(backgroundSettingsByStore[store]?.[slot]),
+    [backgroundSettingsByStore, slot, store]
+  );
   const resolvedHeroPhonePose = useMemo(
     () => resolveIosHeroPhonePose(heroPhonePoseByStore[store]),
     [heroPhonePoseByStore, store]
@@ -970,6 +1024,7 @@ export default function ScreenshotsDialog({
       slotTitleExtraLineColors,
       slotTitleLineGaps,
       slotTitleTypography,
+      slotBackgroundSettings: backgroundSettingsByStore[targetStore],
       heroPhonePose,
       heroPhoneShape: resolvedHeroPhoneShapeForStore,
       heroPhoneLocation,
@@ -983,7 +1038,7 @@ export default function ScreenshotsDialog({
       preset,
       key: JSON.stringify(preset),
     };
-  }, [heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [backgroundSettingsByStore, heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
   const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
@@ -1147,6 +1202,28 @@ export default function ScreenshotsDialog({
     [slot, store]
   );
 
+  const handleBackgroundSettingsChange = useCallback(
+    (key: keyof ScreenshotBackgroundSettings, value: number) => {
+      setBackgroundSettingsByStore((prev) => {
+        const next = {
+          ios: { ...prev.ios },
+          play_store: { ...prev.play_store },
+        } satisfies Record<ScreenshotStore, ScreenshotSlotBackgroundSettingsStateMap>;
+        const targetSlots = getSlotBackgroundSettingsTargets(slot);
+        for (const { id: targetStore } of SCREENSHOT_STORES) {
+          for (const targetSlot of targetSlots) {
+            next[targetStore][targetSlot] = resolveScreenshotBackgroundSettings({
+              ...next[targetStore][targetSlot],
+              [key]: value,
+            });
+          }
+        }
+        return next;
+      });
+    },
+    [slot]
+  );
+
   const handleSaveCurrentSettings = useCallback(async () => {
     if (!appId) return;
 
@@ -1238,6 +1315,18 @@ export default function ScreenshotsDialog({
         [slot]: [],
       },
     }));
+    setBackgroundSettingsByStore((prev) => {
+      const next = {
+        ios: { ...prev.ios },
+        play_store: { ...prev.play_store },
+      } satisfies Record<ScreenshotStore, ScreenshotSlotBackgroundSettingsStateMap>;
+      for (const { id: targetStore } of SCREENSHOT_STORES) {
+        for (const targetSlot of getSlotBackgroundSettingsTargets(slot)) {
+          next[targetStore][targetSlot] = resolveScreenshotBackgroundSettings();
+        }
+      }
+      return next;
+    });
 
     if (slot > 2) return;
 
@@ -1265,11 +1354,11 @@ export default function ScreenshotsDialog({
       setSlotSbeSettingsByStore((prev) => ({
         ios: {
           ...prev.ios,
-          [slot]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+          [slot]: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(slot)),
         },
         play_store: {
           ...prev.play_store,
-          [slot]: resolveSlot1SbeSettings(DEFAULT_SLOT_1_SBE_SETTINGS),
+          [slot]: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(slot)),
         },
       }));
     }
@@ -1361,18 +1450,19 @@ export default function ScreenshotsDialog({
   const handleSlot1SbeSettingsChange = useCallback(
     (key: keyof Slot1SbeSettings, value: number | string) => {
       if (slot > 2) return;
+      const heroSlot = slot === 2 ? 2 : 1;
       setSlotSbeSettingsByStore((prev) => ({
         ios: {
           ...prev.ios,
           [slot]: resolveSlot1SbeSettings({
-            ...(prev.ios?.[slot] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+            ...(prev.ios?.[slot] ?? getDefaultSlotSbeSettings(heroSlot)),
             [key]: value,
           }),
         },
         play_store: {
           ...prev.play_store,
           [slot]: resolveSlot1SbeSettings({
-            ...(prev.play_store?.[slot] ?? DEFAULT_SLOT_1_SBE_SETTINGS),
+            ...(prev.play_store?.[slot] ?? getDefaultSlotSbeSettings(heroSlot)),
             [key]: value,
           }),
         },
@@ -1403,6 +1493,9 @@ export default function ScreenshotsDialog({
       slotPrimaryColor
     );
     const slotTitleLineGap = titleLineGapByStore[store]?.[targetSlot] ?? 0;
+    const slotBackgroundSettings = resolveScreenshotBackgroundSettings(
+      backgroundSettingsByStore[store]?.[targetSlot]
+    );
 
     const targetSlotSbeSettings =
       targetSlot <= 2 ? resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[targetSlot]) : null;
@@ -1430,6 +1523,7 @@ export default function ScreenshotsDialog({
         titleTypography: slotTitleTypography,
         titleExtraLineColors: slotTitleExtraLineColors,
         titleLineGap: slotTitleLineGap,
+        backgroundSettings: slotBackgroundSettings,
         palette: slotPalette,
         screenshotUrl: screenshotDataUrl ?? '',
         imageLoader: browserImageLoader,
@@ -1454,13 +1548,14 @@ export default function ScreenshotsDialog({
       titleTypography: slotTitleTypography,
       titleExtraLineColors: slotTitleExtraLineColors,
       titleLineGap: slotTitleLineGap,
+      backgroundSettings: slotBackgroundSettings,
       palette: slotPalette,
       heroPhonePose: resolvedHeroPhonePose,
       heroPhoneShape: resolvedHeroPhoneShape,
       screenshotSource: screenshotDataUrl || undefined,
     });
     return canvas;
-  }, [browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
+  }, [backgroundSettingsByStore, browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore, titlesByStore]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setPanelState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1631,6 +1726,9 @@ export default function ScreenshotsDialog({
                   titleTypography={titleTypographyByStore[store][previewSlot]}
                   titleExtraLineColors={titleExtraLineColorsByStore[store][previewSlot] ?? []}
                   titleLineGap={titleLineGapByStore[store]?.[previewSlot] ?? 0}
+                  backgroundSettings={resolveScreenshotBackgroundSettings(
+                    backgroundSettingsByStore[store]?.[previewSlot]
+                  )}
                   palette={slotPalettesByStore[store][previewSlot]}
                   heroPhonePose={
                     previewSlot <= 2
@@ -1827,11 +1925,53 @@ export default function ScreenshotsDialog({
                           value={color}
                           disabled={isLocked}
                           onChange={(event) =>
-                            handleTitleExtraLineColorChange(index, event.target.value)
+                    handleTitleExtraLineColorChange(index, event.target.value)
                           }
                         />
                         <code>{color}</code>
                       </div>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <section className="screenshots-palette-panel">
+              <button
+                type="button"
+                className="screenshots-accordion-head"
+                onClick={() => togglePanel('background')}
+                disabled={isLocked}
+              >
+                <div>
+                  <strong>Background</strong>
+                </div>
+                <span>{panelState.background ? '−' : '+'}</span>
+              </button>
+
+              {panelState.background ? (
+                <div className="screenshots-shape-grid">
+                  {([
+                    ['topStop', 'Top Stop', 0.01],
+                    ['midStop', 'Mid Stop', 0.01],
+                    ['bottomStop', 'Bottom Stop', 0.01],
+                    ['midMix', 'Mid Mix', 0.01],
+                    ['bottomMix', 'Bottom Mix', 0.01],
+                  ] as const).map(([key, label, step]) => (
+                    <label key={key} className="screenshots-shape-item">
+                      <div className="screenshots-slider-copy">
+                        <strong>{label}</strong>
+                        <code>{resolvedBackgroundSettings[key]}</code>
+                      </div>
+                      <input
+                        type="number"
+                        step={step}
+                        value={resolvedBackgroundSettings[key]}
+                        disabled={isLocked}
+                        onChange={(event) =>
+                          handleBackgroundSettingsChange(key, Number(event.target.value))
+                        }
+                      />
                     </label>
                   ))}
                 </div>
@@ -1900,86 +2040,6 @@ export default function ScreenshotsDialog({
                     </label>
                   </div>
                 ) : null}
-              </section>
-            ) : null}
-
-            {isHeroSlot ? (
-              <section className="screenshots-palette-panel">
-                <div className="screenshots-accordion-head static">
-                  <div>
-                    <strong>Camera</strong>
-                  </div>
-                </div>
-                <div className="screenshots-panel-actions">
-                  <Button
-                    type="button"
-                    variant={resolvedHeroCameraMode === 'perspective' ? 'primary' : 'ghost'}
-                    disabled={isLocked}
-                    onClick={() =>
-                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'perspective' }))
-                    }
-                  >
-                    Perspective
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={resolvedHeroCameraMode === 'orthographic' ? 'primary' : 'ghost'}
-                    disabled={isLocked}
-                    onClick={() =>
-                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'orthographic' }))
-                    }
-                  >
-                    Orthographic
-                  </Button>
-                </div>
-                <div className="screenshots-shape-grid">
-                  {resolvedHeroCameraMode === 'perspective' ? (
-                    <label className="screenshots-shape-item">
-                      <div className="screenshots-slider-copy">
-                        <strong>FOV</strong>
-                        <code>
-                          {resolvedHeroCameraSettings?.perspectiveFov ??
-                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov}
-                        </code>
-                      </div>
-                      <input
-                        type="number"
-                        value={
-                          resolvedHeroCameraSettings?.perspectiveFov ??
-                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov
-                        }
-                        disabled={isLocked || slot > 2}
-                        onChange={(event) =>
-                          handleHeroCameraSettingsChange('perspectiveFov', Number(event.target.value))
-                        }
-                      />
-                    </label>
-                  ) : (
-                    <label className="screenshots-shape-item">
-                      <div className="screenshots-slider-copy">
-                        <strong>Frustum Height</strong>
-                        <code>
-                          {resolvedHeroCameraSettings?.orthographicFrustumHeight ??
-                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight}
-                        </code>
-                      </div>
-                      <input
-                        type="number"
-                        value={
-                          resolvedHeroCameraSettings?.orthographicFrustumHeight ??
-                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight
-                        }
-                        disabled={isLocked || slot > 2}
-                        onChange={(event) =>
-                          handleHeroCameraSettingsChange(
-                            'orthographicFrustumHeight',
-                            Number(event.target.value)
-                          )
-                        }
-                      />
-                    </label>
-                  )}
-                </div>
               </section>
             ) : null}
 
@@ -2140,6 +2200,86 @@ export default function ScreenshotsDialog({
 
             {isHeroSlot ? (
               <section className="screenshots-palette-panel">
+                <div className="screenshots-accordion-head static">
+                  <div>
+                    <strong>Camera</strong>
+                  </div>
+                </div>
+                <div className="screenshots-panel-actions">
+                  <Button
+                    type="button"
+                    variant={resolvedHeroCameraMode === 'perspective' ? 'primary' : 'ghost'}
+                    disabled={isLocked}
+                    onClick={() =>
+                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'perspective' }))
+                    }
+                  >
+                    Perspective
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={resolvedHeroCameraMode === 'orthographic' ? 'primary' : 'ghost'}
+                    disabled={isLocked}
+                    onClick={() =>
+                      setHeroCameraModeByStore((prev) => ({ ...prev, [store]: 'orthographic' }))
+                    }
+                  >
+                    Orthographic
+                  </Button>
+                </div>
+                <div className="screenshots-shape-grid">
+                  {resolvedHeroCameraMode === 'perspective' ? (
+                    <label className="screenshots-shape-item">
+                      <div className="screenshots-slider-copy">
+                        <strong>FOV</strong>
+                        <code>
+                          {resolvedHeroCameraSettings?.perspectiveFov ??
+                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov}
+                        </code>
+                      </div>
+                      <input
+                        type="number"
+                        value={
+                          resolvedHeroCameraSettings?.perspectiveFov ??
+                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.perspectiveFov
+                        }
+                        disabled={isLocked || slot > 2}
+                        onChange={(event) =>
+                          handleHeroCameraSettingsChange('perspectiveFov', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  ) : (
+                    <label className="screenshots-shape-item">
+                      <div className="screenshots-slider-copy">
+                        <strong>Frustum Height</strong>
+                        <code>
+                          {resolvedHeroCameraSettings?.orthographicFrustumHeight ??
+                            DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight}
+                        </code>
+                      </div>
+                      <input
+                        type="number"
+                        value={
+                          resolvedHeroCameraSettings?.orthographicFrustumHeight ??
+                          DEFAULT_PROCEDURAL_CAMERA_SETTINGS.orthographicFrustumHeight
+                        }
+                        disabled={isLocked || slot > 2}
+                        onChange={(event) =>
+                          handleHeroCameraSettingsChange(
+                            'orthographicFrustumHeight',
+                            Number(event.target.value)
+                          )
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {isHeroSlot ? (
+              <section className="screenshots-palette-panel">
                 <button
                   type="button"
                   className="screenshots-accordion-head"
@@ -2288,6 +2428,7 @@ export default function ScreenshotsDialog({
                     slotTitleLineGaps: titleLineGapByStore[store],
                     titleTypography: resolvedTitleTypography,
                     slotTitleTypography: titleTypographyByStore[store],
+                    slotBackgroundSettings: backgroundSettingsByStore[store],
                     heroPhonePose: resolvedHeroPhonePose,
                     heroPhoneShape: resolvedHeroPhoneShape,
                     heroPhoneLocation: resolvedHeroPhoneLocation,

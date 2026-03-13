@@ -34,6 +34,24 @@ export const DEFAULT_SLOT_1_SBE_SETTINGS: Slot1SbeSettings = {
   originZ: 0.09,
 };
 
+export const DEFAULT_SLOT_2_SBE_SETTINGS: Slot1SbeSettings = {
+  lineWidth: 4,
+  lineColor: '#f38219',
+  opacity: 0.4,
+  scale: 1,
+  angleDeg: 3,
+  copyCount: 60,
+  positionX: 933,
+  positionY: 1000,
+  originX: 333.21617798354,
+  originY: 532,
+  originZ: 0.09,
+};
+
+export function getDefaultSlotSbeSettings(slot: 1 | 2): Slot1SbeSettings {
+  return slot === 2 ? DEFAULT_SLOT_2_SBE_SETTINGS : DEFAULT_SLOT_1_SBE_SETTINGS;
+}
+
 export function resolveSlot1SbeSettings(
   value?: Partial<Slot1SbeSettings> | null
 ): Slot1SbeSettings {

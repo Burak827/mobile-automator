@@ -25,8 +25,8 @@ export function getDefaultScreenshotTitlePrimaryColor(
   palette: ScreenshotTemplatePalette
 ): string {
   void store;
-  if (slot === 1 || slot === 2) return palette.bgInk;
-  return palette.cream;
+  void slot;
+  return palette.bgInk;
 }
 
 export function syncScreenshotTitleExtraLineColors(

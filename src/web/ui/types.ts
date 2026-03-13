@@ -242,6 +242,18 @@ export type ScreenshotHeroCameraSettingsPayload = {
   orthographicFrustumHeight: number;
 };
 
+export type ScreenshotBackgroundSettingsPayload = {
+  topStop: number;
+  midStop: number;
+  bottomStop: number;
+  midMix: number;
+  bottomMix: number;
+};
+
+export type ScreenshotSlotBackgroundSettingsMapPayload = Partial<
+  Record<number, ScreenshotBackgroundSettingsPayload>
+>;
+
 export type ScreenshotSlot1SbePayload = {
   lineWidth: number;
   lineColor: string;
@@ -279,6 +291,7 @@ export type ScreenshotGenerateResponse = {
   heroKeyLightPosition?: ScreenshotHeroLightPositionPayload | null;
   heroKeyLightSettings?: ScreenshotHeroLightSettingsPayload | null;
   slotSbeSettings?: ScreenshotSlotSbeMapPayload;
+  slotBackgroundSettings?: ScreenshotSlotBackgroundSettingsMapPayload;
   heroCameraMode?: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
   heroCameraSettings?: ScreenshotHeroCameraSettingsPayload | null;
   stagedInputPath: string;
@@ -302,6 +315,7 @@ export type ScreenshotPresetPayload = {
   heroKeyLightPosition: ScreenshotHeroLightPositionPayload | null;
   heroKeyLightSettings: ScreenshotHeroLightSettingsPayload | null;
   slotSbeSettings?: ScreenshotSlotSbeMapPayload;
+  slotBackgroundSettings?: ScreenshotSlotBackgroundSettingsMapPayload;
   heroCameraMode: import('../screenshotTemplates/proceduralDeviceConfig').ProceduralCameraMode | null;
   heroCameraSettings: ScreenshotHeroCameraSettingsPayload | null;
   updatedAt: string;
