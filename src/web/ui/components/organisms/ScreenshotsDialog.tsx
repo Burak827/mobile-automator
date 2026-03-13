@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import JSZip from 'jszip';
 import { useDialogController } from '../../hooks/useDialogController';
 import Button from '../atoms/Button';
 import {
@@ -91,6 +92,11 @@ export type ScreenshotRenderedSlotPayload = {
   titleLineGap: number;
 };
 
+export type ScreenshotLocaleBatchPayload = {
+  locale: string;
+  renderedSlots: ScreenshotRenderedSlotPayload[];
+};
+
 export type ScreenshotDialogStartPayload = {
   store: ScreenshotStore;
   locale: string;
@@ -116,6 +122,8 @@ export type ScreenshotDialogStartPayload = {
   heroCameraMode: ProceduralCameraMode | null;
   heroCameraSettings: ProceduralCameraSettings | null;
   renderedSlots: ScreenshotRenderedSlotPayload[];
+  localeBatches?: ScreenshotLocaleBatchPayload[];
+  closeWhenDone?: boolean;
 };
 
 export type ScreenshotPresetConfig = {
@@ -147,7 +155,7 @@ type Props = {
   presets?: ScreenshotPresetMap;
   onClose: () => void;
   onPresetChange?: (store: ScreenshotStore, preset: ScreenshotPresetConfig) => Promise<void> | void;
-  onStart: (payload: ScreenshotDialogStartPayload) => void;
+  onStart: (payload: ScreenshotDialogStartPayload) => Promise<void> | void;
 };
 
 type PreviewCardProps = {
@@ -184,6 +192,74 @@ type ScreenshotSlotFileMap = Record<ScreenshotTemplateSlot, File | null>;
 type ScreenshotSlotPreviewUrlMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPreviewErrorMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotSbeMap = Partial<Record<ScreenshotTemplateSlot, Slot1SbeSettings>>;
+type ScreenshotZipEntry = {
+  path: string;
+  fileName: string;
+  mimeType: string;
+};
+type ScreenshotZipLocaleMap = Record<
+  string,
+  Partial<Record<ScreenshotTemplateSlot, ScreenshotZipEntry>>
+>;
+
+function resolveZipMimeType(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return 'application/octet-stream';
+}
+
+function parseScreenshotZipManifest(archive: JSZip): ScreenshotZipLocaleMap {
+  const result: ScreenshotZipLocaleMap = {};
+  archive.forEach((relativePath, entry) => {
+    if (entry.dir) return;
+    const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!normalizedPath) return;
+    const parts = normalizedPath.split('/').filter(Boolean);
+    if (parts.length < 2) return;
+    const fileName = parts[parts.length - 1] ?? '';
+    const slotToken = fileName.replace(/\.[^.]+$/, '');
+    const slotNumeric = Number(slotToken);
+    if (!SCREENSHOT_TEMPLATE_SLOTS.includes(slotNumeric as ScreenshotTemplateSlot)) return;
+    const locale = parts[parts.length - 2] ?? '';
+    if (!locale) return;
+    if (!result[locale]) {
+      result[locale] = {};
+    }
+    result[locale][slotNumeric as ScreenshotTemplateSlot] = {
+      path: relativePath,
+      fileName,
+      mimeType: resolveZipMimeType(fileName),
+    };
+  });
+  return result;
+}
+
+function findZipLocaleKey(
+  localeMap: ScreenshotZipLocaleMap | undefined,
+  locale: string
+): string | null {
+  if (!localeMap) return null;
+  const normalized = locale.trim();
+  if (!normalized) return null;
+  if (localeMap[normalized]) return normalized;
+  const lower = normalized.toLowerCase();
+  const matched = Object.keys(localeMap).find((key) => key.toLowerCase() === lower);
+  return matched ?? null;
+}
+
+function getZipEntryForSlot(
+  entries: Partial<Record<ScreenshotTemplateSlot, ScreenshotZipEntry>> | undefined,
+  slot: ScreenshotTemplateSlot
+): ScreenshotZipEntry | null {
+  if (!entries) return null;
+  if (slot === 1 || slot === 2) {
+    return entries[1] ?? entries[2] ?? null;
+  }
+  const fivePackKey = (slot - 1) as ScreenshotTemplateSlot;
+  return entries[fivePackKey] ?? entries[slot] ?? null;
+}
 
 function createEmptySlotTitleMap(): ScreenshotSlotTitleMap {
   return {
@@ -424,13 +500,22 @@ function formatFileSize(size: number): string {
   return `${(kb / 1024).toFixed(2)} MB`;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Dosya preview icin okunamadi.'));
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
     reader.readAsDataURL(file);
   });
+}
+
+async function readZipEntryAsDataUrl(archive: JSZip, entryPath: string): Promise<string> {
+  const entry = archive.file(entryPath);
+  if (!entry) {
+    throw new Error(`ZIP içindeki görsel bulunamadı: ${entryPath}`);
+  }
+  const blob = await entry.async('blob');
+  return readFileAsDataUrl(blob);
 }
 
 function dataUrlToBase64(dataUrl: string): string | null {
@@ -607,6 +692,14 @@ export default function ScreenshotsDialog({
     ios: createEmptySlotFileMap(),
     play_store: createEmptySlotFileMap(),
   });
+  const [zipFilesByStore, setZipFilesByStore] = useState<Record<ScreenshotStore, File | null>>({
+    ios: null,
+    play_store: null,
+  });
+  const [zipManifestByStore, setZipManifestByStore] = useState<Record<ScreenshotStore, ScreenshotZipLocaleMap>>({
+    ios: {},
+    play_store: {},
+  });
   const [filePreviewUrlsByStore, setFilePreviewUrlsByStore] = useState<
     Record<ScreenshotStore, ScreenshotSlotPreviewUrlMap>
   >({
@@ -614,6 +707,18 @@ export default function ScreenshotsDialog({
     play_store: createEmptySlotPreviewUrlMap(),
   });
   const [filePreviewErrorsByStore, setFilePreviewErrorsByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotPreviewErrorMap>
+  >({
+    ios: createEmptySlotPreviewErrorMap(),
+    play_store: createEmptySlotPreviewErrorMap(),
+  });
+  const [zipPreviewUrlsByStore, setZipPreviewUrlsByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotPreviewUrlMap>
+  >({
+    ios: createEmptySlotPreviewUrlMap(),
+    play_store: createEmptySlotPreviewUrlMap(),
+  });
+  const [zipPreviewErrorsByStore, setZipPreviewErrorsByStore] = useState<
     Record<ScreenshotStore, ScreenshotSlotPreviewErrorMap>
   >({
     ios: createEmptySlotPreviewErrorMap(),
@@ -668,6 +773,11 @@ export default function ScreenshotsDialog({
     sbe: false,
   });
   const fileReadRequestIdsRef = useRef<Record<string, number>>({});
+  const zipPreviewRequestIdsRef = useRef<Record<string, number>>({});
+  const zipArchivesRef = useRef<Record<ScreenshotStore, JSZip | null>>({
+    ios: null,
+    play_store: null,
+  });
   const wasOpenRef = useRef(false);
   const [fontLoadVersion, setFontLoadVersion] = useState(0);
   const [isPersistingPreset, setIsPersistingPreset] = useState(false);
@@ -817,11 +927,31 @@ export default function ScreenshotsDialog({
       ios: createEmptySlotFileMap(),
       play_store: createEmptySlotFileMap(),
     });
+    zipArchivesRef.current = {
+      ios: null,
+      play_store: null,
+    };
+    setZipFilesByStore({
+      ios: null,
+      play_store: null,
+    });
+    setZipManifestByStore({
+      ios: {},
+      play_store: {},
+    });
     setFilePreviewUrlsByStore({
       ios: createEmptySlotPreviewUrlMap(),
       play_store: createEmptySlotPreviewUrlMap(),
     });
     setFilePreviewErrorsByStore({
+      ios: createEmptySlotPreviewErrorMap(),
+      play_store: createEmptySlotPreviewErrorMap(),
+    });
+    setZipPreviewUrlsByStore({
+      ios: createEmptySlotPreviewUrlMap(),
+      play_store: createEmptySlotPreviewUrlMap(),
+    });
+    setZipPreviewErrorsByStore({
       ios: createEmptySlotPreviewErrorMap(),
       play_store: createEmptySlotPreviewErrorMap(),
     });
@@ -885,6 +1015,38 @@ export default function ScreenshotsDialog({
     const normalizedLocale = locale.trim() || 'en-US';
     return `screenshots/${getScreenshotStorePathToken(store)}/${normalizedLocale}/${slot}.png`;
   }, [locale, slot, store]);
+  const zipLocaleKeys = useMemo(
+    () => Object.keys(zipManifestByStore[store]).sort((a, b) => a.localeCompare(b)),
+    [store, zipManifestByStore]
+  );
+  const zipLocaleSummary = useMemo(
+    () =>
+      zipLocaleKeys.map((localeKey) => {
+        const entries = zipManifestByStore[store][localeKey] ?? {};
+        const availableSlots = SCREENSHOT_TEMPLATE_SLOTS.filter((targetSlot) =>
+          Boolean(getZipEntryForSlot(entries, targetSlot))
+        );
+        const missingSlots = SCREENSHOT_TEMPLATE_SLOTS.filter(
+          (targetSlot) => !getZipEntryForSlot(entries, targetSlot)
+        );
+        return {
+          locale: localeKey,
+          availableSlots,
+          missingSlots,
+          isComplete: missingSlots.length === 0,
+        };
+      }),
+    [store, zipLocaleKeys, zipManifestByStore]
+  );
+  const zipCompleteLocaleCount = useMemo(
+    () => zipLocaleSummary.filter((entry) => entry.isComplete).length,
+    [zipLocaleSummary]
+  );
+  const activeZipLocaleKey = useMemo(
+    () => findZipLocaleKey(zipManifestByStore[store], locale),
+    [locale, store, zipManifestByStore]
+  );
+  const activeZipLocaleEntries = activeZipLocaleKey ? zipManifestByStore[store][activeZipLocaleKey] : undefined;
 
   const resolvedPalette = useMemo(
     () => resolveScreenshotTemplatePalette(store, slotPalettesByStore[store]?.[slot]),
@@ -1044,12 +1206,23 @@ export default function ScreenshotsDialog({
   const isLocked = isBusy;
   const isHeroSlot = slot <= 2;
   const selectedSlotFile = filesByStore[store]?.[slot] ?? null;
-  const selectedSlotPreviewError = filePreviewErrorsByStore[store]?.[slot] ?? '';
+  const selectedZipEntry = getZipEntryForSlot(activeZipLocaleEntries, slot);
+  const selectedSlotPreviewError =
+    zipPreviewErrorsByStore[store]?.[slot] ||
+    filePreviewErrorsByStore[store]?.[slot] ||
+    '';
   const hasAnySlotScreenshot = useMemo(
     () => SCREENSHOT_TEMPLATE_SLOTS.some((targetSlot) => Boolean(filesByStore[store]?.[targetSlot])),
     [filesByStore, store]
   );
-  const canStart = locale.trim().length > 0 && hasAnySlotScreenshot && !isLocked;
+  const hasAnyZipScreenshot = useMemo(
+    () =>
+      Object.values(zipManifestByStore[store]).some((localeEntries) =>
+        SCREENSHOT_TEMPLATE_SLOTS.some((targetSlot) => Boolean(localeEntries[targetSlot]))
+      ),
+    [store, zipManifestByStore]
+  );
+  const canStart = !isLocked && (hasAnySlotScreenshot || hasAnyZipScreenshot);
   const canSaveSettings = Boolean(appId) && !isLocked && !isPersistingPreset;
 
   const handleSlotFileChange = useCallback((nextFile: File | null) => {
@@ -1106,6 +1279,82 @@ export default function ScreenshotsDialog({
         }));
       });
   }, [slot, store]);
+
+  const handleZipFileChange = useCallback((nextFile: File | null) => {
+    if (!nextFile) return;
+    void (async () => {
+      const archive = await JSZip.loadAsync(nextFile);
+      const manifest = parseScreenshotZipManifest(archive);
+      const locales = Object.keys(manifest).sort((a, b) => a.localeCompare(b));
+      if (locales.length === 0) {
+        throw new Error('ZIP içinde locale klasörü ve 1..6 adlı görseller bulunamadı.');
+      }
+      zipArchivesRef.current[store] = archive;
+      setZipFilesByStore((prev) => ({
+        ...prev,
+        [store]: nextFile,
+      }));
+      setZipManifestByStore((prev) => ({
+        ...prev,
+        [store]: manifest,
+      }));
+      setZipPreviewErrorsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewErrorMap(),
+      }));
+      if (!findZipLocaleKey(manifest, locale)) {
+        setLocale(locales[0] ?? 'en-US');
+      }
+    })().catch((error) => {
+      zipArchivesRef.current[store] = null;
+      setZipFilesByStore((prev) => ({
+        ...prev,
+        [store]: null,
+      }));
+      setZipManifestByStore((prev) => ({
+        ...prev,
+        [store]: {},
+      }));
+      setZipPreviewUrlsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewUrlMap(),
+      }));
+      setZipPreviewErrorsByStore((prev) => ({
+        ...prev,
+        [store]: {
+          ...createEmptySlotPreviewErrorMap(),
+          [slot]:
+            error instanceof Error ? error.message : 'ZIP içeriği okunamadı.',
+        },
+      }));
+    });
+  }, [locale, slot, store]);
+
+  const loadZipLocaleScreenshotDataUrls = useCallback(async (
+    targetStore: ScreenshotStore,
+    targetLocale: string
+  ): Promise<Partial<Record<ScreenshotTemplateSlot, string>>> => {
+    const archive = zipArchivesRef.current[targetStore];
+    const localeKey = findZipLocaleKey(zipManifestByStore[targetStore], targetLocale);
+    if (!archive || !localeKey) return {};
+    const localeEntries = zipManifestByStore[targetStore][localeKey];
+    const dataUrlByPath = new Map<string, string>();
+    const pairs = await Promise.all(
+      SCREENSHOT_TEMPLATE_SLOTS.map(async (targetSlot) => {
+        const entry = getZipEntryForSlot(localeEntries, targetSlot);
+        if (!entry) return null;
+        if (!dataUrlByPath.has(entry.path)) {
+          dataUrlByPath.set(entry.path, await readZipEntryAsDataUrl(archive, entry.path));
+        }
+        return [targetSlot, dataUrlByPath.get(entry.path) ?? ''] as const;
+      })
+    );
+    return pairs.reduce((acc, pair) => {
+      if (!pair) return acc;
+      acc[pair[0]] = pair[1];
+      return acc;
+    }, {} as Partial<Record<ScreenshotTemplateSlot, string>>);
+  }, [zipManifestByStore]);
 
   const handlePaletteChange = useCallback(
     (key: keyof ScreenshotTemplatePalette, value: string) => {
@@ -1583,6 +1832,56 @@ export default function ScreenshotsDialog({
 
   useEffect(() => {
     if (!isOpen) return;
+    const localeKey = findZipLocaleKey(zipManifestByStore[store], locale);
+    const archive = zipArchivesRef.current[store];
+    if (!archive || !localeKey) {
+      setZipPreviewUrlsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewUrlMap(),
+      }));
+      setZipPreviewErrorsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewErrorMap(),
+      }));
+      return;
+    }
+
+    const requestKey = store;
+    const requestId = (zipPreviewRequestIdsRef.current[requestKey] ?? 0) + 1;
+    zipPreviewRequestIdsRef.current[requestKey] = requestId;
+
+    void (async () => {
+      const dataUrls = await loadZipLocaleScreenshotDataUrls(store, localeKey);
+      if (zipPreviewRequestIdsRef.current[requestKey] !== requestId) return;
+      setZipPreviewUrlsByStore((prev) => ({
+        ...prev,
+        [store]: {
+          ...createEmptySlotPreviewUrlMap(),
+          ...dataUrls,
+        },
+      }));
+      setZipPreviewErrorsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewErrorMap(),
+      }));
+    })().catch((error) => {
+      if (zipPreviewRequestIdsRef.current[requestKey] !== requestId) return;
+      setZipPreviewUrlsByStore((prev) => ({
+        ...prev,
+        [store]: createEmptySlotPreviewUrlMap(),
+      }));
+      setZipPreviewErrorsByStore((prev) => ({
+        ...prev,
+        [store]: {
+          ...createEmptySlotPreviewErrorMap(),
+          [slot]: error instanceof Error ? error.message : 'ZIP preview okunamadı.',
+        },
+      }));
+    });
+  }, [isOpen, loadZipLocaleScreenshotDataUrls, locale, slot, store, zipManifestByStore]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     setTitleExtraLineColorsByStore((prev) => {
       const currentSlotColors = prev[store]?.[slot] ?? [];
       const nextSlotColors = syncScreenshotTitleExtraLineColors(
@@ -1746,7 +2045,11 @@ export default function ScreenshotsDialog({
                   }
                   heroCameraMode={previewSlot <= 2 ? resolvedHeroCameraMode : null}
                   heroCameraSettings={previewSlot <= 2 ? resolvedHeroCameraSettings : null}
-                  screenshotUrl={filePreviewUrlsByStore[store]?.[previewSlot] ?? ''}
+                  screenshotUrl={
+                    zipPreviewUrlsByStore[store]?.[previewSlot] ||
+                    filePreviewUrlsByStore[store]?.[previewSlot] ||
+                    ''
+                  }
                   imageLoader={browserImageLoader}
                   fontLoadVersion={fontLoadVersion}
                   disabled={isLocked}
@@ -1762,6 +2065,7 @@ export default function ScreenshotsDialog({
               <label>
                 Locale
                 <input
+                  list="screenshots-zip-locales"
                   type="text"
                   value={locale}
                   onChange={(event) => setLocale(event.target.value)}
@@ -1769,6 +2073,11 @@ export default function ScreenshotsDialog({
                   disabled={isLocked}
                 />
               </label>
+              <datalist id="screenshots-zip-locales">
+                {zipLocaleKeys.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
 
               <label>
                 Slot
@@ -1861,7 +2170,54 @@ export default function ScreenshotsDialog({
             </div>
 
             <label className="screenshot-file-field">
-              Screenshot
+              Screenshots ZIP
+              <input
+                type="file"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                disabled={isLocked}
+                onChange={(event) => {
+                  const nextFile = event.target.files?.[0] ?? null;
+                  handleZipFileChange(nextFile);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            <div className="screenshot-file-meta">
+              {zipFilesByStore[store]
+                ? `${zipFilesByStore[store]?.name} - ${zipLocaleKeys.length} locale`
+                : 'Henüz ZIP seçilmedi.'}
+            </div>
+            {zipLocaleKeys.length > 0 ? (
+              <section className="screenshots-zip-summary">
+                <div className="screenshots-zip-summary-head">
+                  <strong>ZIP Özeti</strong>
+                  <span>
+                    {zipCompleteLocaleCount}/{zipLocaleKeys.length} locale tam
+                  </span>
+                </div>
+                <div className="screenshots-zip-summary-list">
+                  {zipLocaleSummary.map((entry) => (
+                    <div
+                      key={entry.locale}
+                      className={`screenshots-zip-summary-item${
+                        entry.locale === activeZipLocaleKey ? ' active' : ''
+                      }`}
+                    >
+                      <strong>{entry.locale}</strong>
+                      <span>
+                        {entry.isComplete
+                          ? '1-6 hazır'
+                          : `Eksik: ${entry.missingSlots.join(', ')}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <label className="screenshot-file-field">
+              Screenshot Fallback
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/jpg"
@@ -1875,7 +2231,9 @@ export default function ScreenshotsDialog({
             </label>
 
             <div className="screenshot-file-meta">
-              {selectedSlotFile
+              {selectedZipEntry
+                ? `${activeZipLocaleKey}/${selectedZipEntry.fileName}`
+                : selectedSlotFile
                 ? `${selectedSlotFile.name} - ${formatFileSize(selectedSlotFile.size)}`
                 : 'Henüz dosya seçilmedi.'}
             </div>
@@ -2350,11 +2708,9 @@ export default function ScreenshotsDialog({
               variant="primary"
               disabled={!canStart}
               onClick={() => {
-                const nextLocale = locale.trim();
-                if (!nextLocale) return;
-
                 void (async () => {
-                  const renderedSlots: ScreenshotRenderedSlotPayload[] = [];
+                  const zipLocales =
+                    zipLocaleKeys.length > 0 ? zipLocaleKeys : [locale.trim() || 'en-US'];
                   const firstAvailableFile =
                     filesByStore[store][slot] ??
                     SCREENSHOT_TEMPLATE_SLOTS.map((targetSlot) => filesByStore[store][targetSlot]).find(
@@ -2362,86 +2718,105 @@ export default function ScreenshotsDialog({
                     ) ??
                     null;
 
-                  for (const targetSlot of SCREENSHOT_TEMPLATE_SLOTS) {
-                    const slotFile = filesByStore[store][targetSlot];
-                    const slotScreenshotDataUrl =
-                      filePreviewUrlsByStore[store]?.[targetSlot] ||
-                      (slotFile ? await readFileAsDataUrl(slotFile) : '');
-                    const renderedCanvas = await renderBrowserScreenshotCanvas(
-                      targetSlot,
-                      slotScreenshotDataUrl
-                    );
-                    const dataUrl = renderedCanvas.toDataURL('image/png');
-                    const slotPalette = resolveScreenshotTemplatePalette(
-                      store,
-                      slotPalettesByStore[store]?.[targetSlot]
-                    );
-                    const slotTitle = titlesByStore[store]?.[targetSlot] ?? '';
-                    const slotTitleTypography = resolveScreenshotTitleTypography(
-                      store,
-                      targetSlot,
-                      titleTypographyByStore[store]?.[targetSlot]
-                    );
-                    const slotTitleLines = buildTitleLines(targetSlot, slotTitle);
-                    const slotPrimaryColor = getDefaultScreenshotTitlePrimaryColor(
-                      store,
-                      targetSlot,
-                      slotPalette
-                    );
+                  for (let localeIndex = 0; localeIndex < zipLocales.length; localeIndex += 1) {
+                    const targetLocale = zipLocales[localeIndex] ?? 'en-US';
+                    const localeZipDataUrls =
+                      zipLocaleKeys.length > 0
+                        ? await loadZipLocaleScreenshotDataUrls(store, targetLocale)
+                        : {};
+                    const renderedSlots: ScreenshotRenderedSlotPayload[] = [];
 
-                    renderedSlots.push({
-                      slot: targetSlot,
-                      title: slotTitle.trim(),
-                      renderedImageBase64: dataUrl.split(',')[1] ?? null,
-                      sourceImageBase64: slotScreenshotDataUrl
-                        ? dataUrlToBase64(slotScreenshotDataUrl)
-                        : null,
-                      sourceFileName: slotFile?.name ?? null,
-                      sourceMimeType: slotFile?.type || null,
-                      rendererMode:
-                        targetSlot <= 2
-                          ? 'procedural-three'
-                          : 'canvas-2d',
-                      palette: slotPalette,
-                      titleTypography: slotTitleTypography,
-                      titleExtraLineColors: syncScreenshotTitleExtraLineColors(
-                        titleExtraLineColorsByStore[store]?.[targetSlot],
-                        slotTitleLines.length,
-                        slotPrimaryColor
-                      ),
-                      titleLineGap: titleLineGapByStore[store]?.[targetSlot] ?? 0,
-                    });
+                    for (const targetSlot of SCREENSHOT_TEMPLATE_SLOTS) {
+                      const slotFile = filesByStore[store][targetSlot];
+                      const slotZipEntry = getZipEntryForSlot(
+                        zipManifestByStore[store]?.[targetLocale],
+                        targetSlot
+                      );
+                      const slotScreenshotDataUrl =
+                        localeZipDataUrls[targetSlot] ??
+                        filePreviewUrlsByStore[store]?.[targetSlot] ??
+                        (slotFile ? await readFileAsDataUrl(slotFile) : '');
+                      const renderedCanvas = await renderBrowserScreenshotCanvas(
+                        targetSlot,
+                        slotScreenshotDataUrl
+                      );
+                      const dataUrl = renderedCanvas.toDataURL('image/png');
+                      const slotPalette = resolveScreenshotTemplatePalette(
+                        store,
+                        slotPalettesByStore[store]?.[targetSlot]
+                      );
+                      const slotTitle = titlesByStore[store]?.[targetSlot] ?? '';
+                      const slotTitleTypography = resolveScreenshotTitleTypography(
+                        store,
+                        targetSlot,
+                        titleTypographyByStore[store]?.[targetSlot]
+                      );
+                      const slotTitleLines = buildTitleLines(targetSlot, slotTitle);
+                      const slotPrimaryColor = getDefaultScreenshotTitlePrimaryColor(
+                        store,
+                        targetSlot,
+                        slotPalette
+                      );
+
+                      renderedSlots.push({
+                        slot: targetSlot,
+                        title: slotTitle.trim(),
+                        renderedImageBase64: dataUrl.split(',')[1] ?? null,
+                        sourceImageBase64: slotScreenshotDataUrl
+                          ? dataUrlToBase64(slotScreenshotDataUrl)
+                          : null,
+                        sourceFileName: slotZipEntry?.fileName ?? slotFile?.name ?? null,
+                        sourceMimeType: slotZipEntry?.mimeType ?? slotFile?.type ?? null,
+                        rendererMode:
+                          targetSlot <= 2
+                            ? 'procedural-three'
+                            : 'canvas-2d',
+                        palette: slotPalette,
+                        titleTypography: slotTitleTypography,
+                        titleExtraLineColors: syncScreenshotTitleExtraLineColors(
+                          titleExtraLineColorsByStore[store]?.[targetSlot],
+                          slotTitleLines.length,
+                          slotPrimaryColor
+                        ),
+                        titleLineGap: titleLineGapByStore[store]?.[targetSlot] ?? 0,
+                      });
+                    }
+
+                    await Promise.resolve(
+                      onStart({
+                        locale: targetLocale,
+                        store,
+                        slot,
+                        title: resolvedTitle.trim(),
+                        file: selectedSlotFile ?? firstAvailableFile,
+                        renderedImageBase64:
+                          renderedSlots.find((item) => item.slot === slot)?.renderedImageBase64 ?? null,
+                        rendererMode:
+                          renderedSlots.find((item) => item.slot === slot)?.rendererMode ?? 'canvas-2d',
+                        palette: resolvedPalette,
+                        slotPalettes: slotPalettesByStore[store],
+                        slotTitles: titlesByStore[store],
+                        slotTitleExtraLineColors: persistedTitleExtraLineColorsForStore,
+                        slotTitleLineGaps: titleLineGapByStore[store],
+                        titleTypography: resolvedTitleTypography,
+                        slotTitleTypography: titleTypographyByStore[store],
+                        slotBackgroundSettings: backgroundSettingsByStore[store],
+                        heroPhonePose: resolvedHeroPhonePose,
+                        heroPhoneShape: resolvedHeroPhoneShape,
+                        heroPhoneLocation: resolvedHeroPhoneLocation,
+                        heroKeyLightPosition: resolvedHeroKeyLightPosition,
+                        heroKeyLightSettings: resolvedHeroKeyLightSettings,
+                        slotSbeSettings: {
+                          1: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[1]),
+                          2: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[2]),
+                        },
+                        heroCameraMode: resolvedHeroCameraMode,
+                        heroCameraSettings: resolvedHeroCameraSettings,
+                        renderedSlots,
+                        closeWhenDone: localeIndex === zipLocales.length - 1,
+                      })
+                    );
                   }
-
-                  onStart({
-                    locale: nextLocale,
-                    store,
-                    slot,
-                    title: resolvedTitle.trim(),
-                    file: selectedSlotFile ?? firstAvailableFile,
-                    renderedImageBase64: renderedSlots.find((item) => item.slot === slot)?.renderedImageBase64 ?? null,
-                    rendererMode: renderedSlots.find((item) => item.slot === slot)?.rendererMode ?? 'canvas-2d',
-                    palette: resolvedPalette,
-                    slotPalettes: slotPalettesByStore[store],
-                    slotTitles: titlesByStore[store],
-                    slotTitleExtraLineColors: persistedTitleExtraLineColorsForStore,
-                    slotTitleLineGaps: titleLineGapByStore[store],
-                    titleTypography: resolvedTitleTypography,
-                    slotTitleTypography: titleTypographyByStore[store],
-                    slotBackgroundSettings: backgroundSettingsByStore[store],
-                    heroPhonePose: resolvedHeroPhonePose,
-                    heroPhoneShape: resolvedHeroPhoneShape,
-                    heroPhoneLocation: resolvedHeroPhoneLocation,
-                    heroKeyLightPosition: resolvedHeroKeyLightPosition,
-                    heroKeyLightSettings: resolvedHeroKeyLightSettings,
-                    slotSbeSettings: {
-                      1: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[1]),
-                      2: resolveSlot1SbeSettings(slotSbeSettingsByStore[store]?.[2]),
-                    },
-                    heroCameraMode: resolvedHeroCameraMode,
-                    heroCameraSettings: resolvedHeroCameraSettings,
-                    renderedSlots,
-                  });
                 })().catch((error) => {
                   setFilePreviewErrorsByStore((prev) => ({
                     ...prev,
@@ -2453,7 +2828,7 @@ export default function ScreenshotsDialog({
                 });
               }}
             >
-              {isBusy ? 'İşleniyor...' : '6 Screenshot Üret'}
+              {isBusy ? 'İşleniyor...' : zipLocaleKeys.length > 0 ? 'Screenshotları Üret' : '6 Screenshot Üret'}
             </Button>
           </div>
         </div>

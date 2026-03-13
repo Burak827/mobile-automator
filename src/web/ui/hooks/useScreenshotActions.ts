@@ -117,6 +117,7 @@ export function useScreenshotActions(params: {
     heroCameraMode,
     heroCameraSettings,
     renderedSlots,
+    closeWhenDone = true,
   }: ScreenshotDialogStartPayload) => {
     if (!selectedAppId) return;
 
@@ -220,7 +221,7 @@ export function useScreenshotActions(params: {
       if (successCount > 0) {
         pushStatus(`✅ ${successCount}/${slotsToGenerate.length} screenshot yazıldı.`);
       }
-      if (successCount === slotsToGenerate.length) {
+      if (successCount === slotsToGenerate.length && closeWhenDone) {
         setIsScreenshotsOpen(false);
       }
     } catch (error) {
