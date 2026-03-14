@@ -40,6 +40,20 @@ export type ScreenshotCanvasImageLoader = (
   source: string | Uint8Array
 ) => Promise<any>;
 
+export type ScreenshotTitleTemplateContext = {
+  localeAppName?: string | null;
+};
+
+export type ScreenshotTitleRenderSegment = {
+  text: string;
+  color?: string | null;
+};
+
+export type ScreenshotTitleRenderLine = {
+  text: string;
+  segments: ScreenshotTitleRenderSegment[];
+};
+
 export const IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER = 2;
 export const IOS_HERO_SLOT_2_SCENE_OFFSET_Y = 0;
 export const IOS_HERO_SPLIT_SEAM_GAP_PX = 80;
@@ -58,6 +72,7 @@ export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
   slot: ScreenshotTemplateSlot;
   title: string;
+  titleTemplateContext?: ScreenshotTitleTemplateContext | null;
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
@@ -81,7 +96,7 @@ export async function drawStoreScreenshotToContext(
 ): Promise<{ width: number; height: number; palette: ScreenshotTemplatePalette }> {
   const canvasSize = getScreenshotTemplateCanvasSize(input.store);
   const palette = resolveScreenshotTemplatePalette(input.store, input.palette);
-  const titleLines = buildTitleLines(input.slot, input.title);
+  const titleLines = buildStyledTitleLines(input.slot, input.title, input.titleTemplateContext);
   const titleTypography = resolveScreenshotTitleTypography(
     input.store,
     input.slot,
@@ -152,7 +167,7 @@ function drawIosFrame(
   ctx: any,
   input: {
     slot: ScreenshotTemplateSlot;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -180,7 +195,7 @@ function drawIosSplitHero(
   ctx: any,
   input: {
     slot: 1 | 2;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -241,7 +256,7 @@ export function drawIosSplitHeroBackdrop(
   ctx: any,
   input: {
     slot: 1 | 2;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -325,7 +340,7 @@ function drawIosPoster(
   ctx: any,
   input: {
     slot: 3 | 4 | 5 | 6;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -363,7 +378,7 @@ export function drawIosPosterBackdrop(
   ctx: any,
   input: {
     slot: 3 | 4 | 5 | 6;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -404,7 +419,7 @@ function drawPlayStoreFrame(
   ctx: any,
   input: {
     slot: ScreenshotTemplateSlot;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -430,7 +445,7 @@ function drawPlayStoreSplitHero(
   ctx: any,
   input: {
     slot: 1 | 2;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -489,7 +504,7 @@ export function drawPlayStoreSplitHeroBackdrop(
   ctx: any,
   input: {
     slot: 1 | 2;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -547,7 +562,7 @@ function drawPlayStorePoster(
   ctx: any,
   input: {
     slot: 3 | 4 | 5 | 6;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -585,7 +600,7 @@ export function drawPlayStorePosterBackdrop(
   ctx: any,
   input: {
     slot: 3 | 4 | 5 | 6;
-    titleLines: string[];
+    titleLines: ScreenshotTitleRenderLine[];
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
@@ -857,7 +872,7 @@ function drawTitleBlock(
     x: number;
     y: number;
     maxWidth?: number;
-    lines: string[];
+    lines: ScreenshotTitleRenderLine[];
     fontFamily: string;
     fontSize: number;
     lineHeight: number;
@@ -882,7 +897,7 @@ function drawTitleBlock(
       input.lineColors?.[index] ??
       (input.accentFirstLine && index === 0 && input.accentColor ? input.accentColor : input.color);
     ctx.fillText(
-      line,
+      line.text,
       anchorX,
       input.y + index * (input.lineHeight + (input.lineGap ?? 0))
     );
@@ -1127,69 +1142,289 @@ function roundedRectPath(
   ctx.closePath();
 }
 
-export function buildTitleLines(slot: ScreenshotTemplateSlot, title: string): string[] {
-  const normalized = title.replace(/\r/g, '').trim() || 'Your app headline';
-  const manualLines = normalized
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+type StyledWordToken = {
+  text: string;
+  color?: string | null;
+};
+
+type ParsedTitleTemplateSegment = ScreenshotTitleRenderSegment;
+
+const LOCALE_APP_NAME_TOKENS = new Set([
+  'localeappname',
+  'applocalename',
+  'applocalizedname',
+  'localappname',
+]);
+const EMPTY_TITLE_TOKENS = new Set([
+  'empty',
+]);
+
+export function buildTitleLines(
+  slot: ScreenshotTemplateSlot,
+  title: string,
+  context?: ScreenshotTitleTemplateContext | null
+): string[] {
+  return buildStyledTitleLines(slot, title, context).map((line) => line.text);
+}
+
+export function buildStyledTitleLines(
+  slot: ScreenshotTemplateSlot,
+  title: string,
+  context?: ScreenshotTitleTemplateContext | null
+): ScreenshotTitleRenderLine[] {
+  const normalized = normalizeTitleInput(title);
+  const { segments: resolvedSegments, hasExplicitEmpty } = parseTitleTemplateSegments(normalized, context);
+  const manualLines = splitSegmentsByManualLines(resolvedSegments);
 
   if (manualLines.length > 1) {
     return manualLines;
   }
 
-  const tokens = normalized
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
+  const tokens = tokenizeStyledWords(resolvedSegments);
+  if (tokens.length === 0) {
+    if (hasExplicitEmpty) {
+      return [createStyledLine([])];
+    }
+    return [createStyledLine([{ text: 'Your app headline' }])];
+  }
 
   if (slot === 1 && tokens.length >= 4) {
-    return [tokens.slice(0, 2).join(' '), tokens.slice(2).join(' ')];
+    return [
+      createStyledLineFromTokens(tokens.slice(0, 2)),
+      createStyledLineFromTokens(tokens.slice(2)),
+    ];
   }
 
   if (slot === 2 && tokens.length >= 6) {
     return [
-      tokens.slice(0, 3).join(' '),
-      tokens.slice(3, 6).join(' '),
-      tokens.slice(6).join(' '),
-    ].filter((line) => line.length > 0);
+      createStyledLineFromTokens(tokens.slice(0, 3)),
+      createStyledLineFromTokens(tokens.slice(3, 6)),
+      createStyledLineFromTokens(tokens.slice(6)),
+    ].filter((line) => line.text.length > 0);
   }
 
-  return wrapTitle(normalized, slot <= 2 ? 24 : 17, 3);
+  return wrapStyledTitle(tokens, slot <= 2 ? 24 : 17, 3);
 }
 
-function wrapTitle(title: string, maxCharsPerLine: number, maxLines: number): string[] {
-  const tokens = title
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
+function normalizeTitleInput(title: string): string {
+  return title.replace(/\r/g, '').trim() || 'Your app headline';
+}
 
-  const lines: string[] = [];
-  let current = '';
+function parseTitleTemplateSegments(
+  title: string,
+  context?: ScreenshotTitleTemplateContext | null
+): { segments: ParsedTitleTemplateSegment[]; hasExplicitEmpty: boolean } {
+  const segments: ParsedTitleTemplateSegment[] = [];
+  let hasExplicitEmpty = false;
+  let cursor = 0;
+
+  while (cursor < title.length) {
+    const openIndex = title.indexOf('{{', cursor);
+    if (openIndex < 0) {
+      pushParsedSegment(segments, title.slice(cursor));
+      break;
+    }
+
+    if (openIndex > cursor) {
+      pushParsedSegment(segments, title.slice(cursor, openIndex));
+    }
+
+    const closeIndex = title.indexOf('}}', openIndex + 2);
+    if (closeIndex < 0) {
+      pushParsedSegment(segments, title.slice(openIndex));
+      break;
+    }
+
+    const rawBody = title.slice(openIndex + 2, closeIndex).trim();
+    const parsed = parseTitleTemplateToken(rawBody, context);
+    if (parsed) {
+      if (parsed.text.length === 0) {
+        hasExplicitEmpty = true;
+      }
+      pushParsedSegment(segments, parsed.text, parsed.color ?? undefined);
+    } else {
+      pushParsedSegment(segments, title.slice(openIndex, closeIndex + 2));
+    }
+    cursor = closeIndex + 2;
+  }
+
+  const normalized = segments.filter((segment) => segment.text.length > 0);
+  return {
+    segments: normalized,
+    hasExplicitEmpty,
+  };
+}
+
+function parseTitleTemplateToken(
+  tokenBody: string,
+  context?: ScreenshotTitleTemplateContext | null
+): ParsedTitleTemplateSegment | null {
+  if (!tokenBody) return null;
+
+  const compactBody = tokenBody.replace(/\s+/g, '').toLowerCase();
+  if (LOCALE_APP_NAME_TOKENS.has(compactBody)) {
+    return {
+      text: resolveLocaleAppNameToken(context),
+    };
+  }
+  if (EMPTY_TITLE_TOKENS.has(compactBody)) {
+    return {
+      text: '',
+    };
+  }
+  return null;
+}
+
+function resolveLocaleAppNameToken(context?: ScreenshotTitleTemplateContext | null): string {
+  return (context?.localeAppName ?? '').trim();
+}
+
+function pushParsedSegment(
+  segments: ParsedTitleTemplateSegment[],
+  text: string,
+  color?: string
+): void {
+  if (!text) return;
+  const previous = segments[segments.length - 1];
+  if (previous && (previous.color ?? null) === (color ?? null)) {
+    previous.text += text;
+    return;
+  }
+  segments.push({ text, color });
+}
+
+function splitSegmentsByManualLines(
+  segments: ParsedTitleTemplateSegment[]
+): ScreenshotTitleRenderLine[] {
+  const lines: ParsedTitleTemplateSegment[][] = [[]];
+
+  for (const segment of segments) {
+    const parts = segment.text.split('\n');
+    for (const [index, part] of parts.entries()) {
+      if (part.length > 0) {
+        lines[lines.length - 1].push({ text: part, color: segment.color });
+      }
+      if (index < parts.length - 1) {
+        lines.push([]);
+      }
+    }
+  }
+
+  return lines
+    .map((line) => trimStyledLine(line))
+    .filter((line) => line.text.length > 0);
+}
+
+function trimStyledLine(segments: ParsedTitleTemplateSegment[]): ScreenshotTitleRenderLine {
+  let remainingTrimLeft = true;
+  const nextSegments = segments
+    .map((segment) => {
+      let text = segment.text;
+      if (remainingTrimLeft) {
+        text = text.replace(/^\s+/, '');
+        remainingTrimLeft = text.length === 0;
+      }
+      return {
+        text,
+        color: segment.color,
+      };
+    })
+    .filter((segment) => segment.text.length > 0);
+
+  for (let index = nextSegments.length - 1; index >= 0; index -= 1) {
+    nextSegments[index].text = nextSegments[index].text.replace(/\s+$/, '');
+    if (nextSegments[index].text.length > 0) break;
+    nextSegments.splice(index, 1);
+  }
+
+  return createStyledLine(nextSegments);
+}
+
+function tokenizeStyledWords(segments: ParsedTitleTemplateSegment[]): StyledWordToken[] {
+  const tokens: StyledWordToken[] = [];
+  for (const segment of segments) {
+    const matches = segment.text.match(/\S+/g) ?? [];
+    for (const token of matches) {
+      tokens.push({ text: token, color: segment.color });
+    }
+  }
+  return tokens;
+}
+
+function createStyledLineFromTokens(tokens: StyledWordToken[]): ScreenshotTitleRenderLine {
+  const segments: ScreenshotTitleRenderSegment[] = [];
+  for (const [index, token] of tokens.entries()) {
+    const text = index === 0 ? token.text : ` ${token.text}`;
+    pushStyledRenderSegment(segments, text, token.color ?? undefined);
+  }
+  return createStyledLine(segments);
+}
+
+function wrapStyledTitle(
+  tokens: StyledWordToken[],
+  maxCharsPerLine: number,
+  maxLines: number
+): ScreenshotTitleRenderLine[] {
+  const lines: StyledWordToken[][] = [];
+  let current: StyledWordToken[] = [];
+  let currentLength = 0;
+  let consumed = 0;
 
   for (const token of tokens) {
-    const candidate = current ? `${current} ${token}` : token;
-    if (candidate.length <= maxCharsPerLine || current.length === 0) {
-      current = candidate;
+    const candidateLength = current.length === 0
+      ? token.text.length
+      : currentLength + 1 + token.text.length;
+    if (candidateLength <= maxCharsPerLine || current.length === 0) {
+      current.push(token);
+      currentLength = candidateLength;
+      consumed += 1;
       continue;
     }
 
     lines.push(current);
-    current = token;
-    if (lines.length === maxLines - 1) break;
+    current = [token];
+    currentLength = token.text.length;
+    consumed += 1;
+    if (lines.length === maxLines - 1) {
+      break;
+    }
   }
 
-  if (lines.length < maxLines && current) {
+  if (lines.length < maxLines && current.length > 0) {
     lines.push(current);
   }
 
-  const consumed = lines.join(' ').split(/\s+/).filter(Boolean).length;
   const remaining = tokens.slice(consumed);
   if (remaining.length > 0 && lines.length > 0) {
-    lines[lines.length - 1] = `${lines[lines.length - 1]} ${remaining.join(' ')}`;
+    lines[lines.length - 1] = [...lines[lines.length - 1], ...remaining];
   }
 
-  return lines.slice(0, maxLines);
+  return lines.slice(0, maxLines).map(createStyledLineFromTokens);
+}
+
+function createStyledLine(segments: ScreenshotTitleRenderSegment[]): ScreenshotTitleRenderLine {
+  const merged: ScreenshotTitleRenderSegment[] = [];
+  for (const segment of segments) {
+    pushStyledRenderSegment(merged, segment.text, segment.color ?? undefined);
+  }
+  return {
+    text: merged.map((segment) => segment.text).join(''),
+    segments: merged,
+  };
+}
+
+function pushStyledRenderSegment(
+  segments: ScreenshotTitleRenderSegment[],
+  text: string,
+  color?: string
+): void {
+  if (!text) return;
+  const previous = segments[segments.length - 1];
+  if (previous && (previous.color ?? null) === (color ?? null)) {
+    previous.text += text;
+    return;
+  }
+  segments.push({ text, color });
 }
 
 function imageSize(image: any): { width: number; height: number } {

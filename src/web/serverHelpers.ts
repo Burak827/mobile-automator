@@ -118,6 +118,12 @@ export function toNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function normalizeScreenshotTranslationLocaleKey(value: unknown): string | undefined {
+  const locale = toNonEmptyString(value);
+  if (!locale) return undefined;
+  return locale.replace(/_/g, "-");
+}
+
 export function toOptionalNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -620,10 +626,18 @@ export function parseScreenshotTitleTranslationsInput(
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const next: Record<string, Record<ScreenshotTemplateSlot, string>> = {};
 
-  for (const [locale, titles] of Object.entries(raw)) {
-    const normalizedLocale = toNonEmptyString(locale);
+  const sortedEntries = Object.entries(raw).sort(
+    ([leftLocale], [rightLocale]) =>
+      (leftLocale.includes("_") ? 0 : 1) - (rightLocale.includes("_") ? 0 : 1)
+  );
+
+  for (const [locale, titles] of sortedEntries) {
+    const normalizedLocale = normalizeScreenshotTranslationLocaleKey(locale);
     if (!normalizedLocale) continue;
-    next[normalizedLocale] = parseStoredScreenshotSlotTitles(titles);
+    next[normalizedLocale] = {
+      ...(next[normalizedLocale] ?? parseStoredScreenshotSlotTitles(undefined)),
+      ...parseStoredScreenshotSlotTitles(titles),
+    };
   }
 
   return next;

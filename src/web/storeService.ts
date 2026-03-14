@@ -1,5 +1,4 @@
 import { AscClient, type QueryValue } from "../ascClient.js";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   AppStoreVersionAttributes,
@@ -1335,6 +1334,9 @@ export class StoreApiService {
       const attrs = row.attributes ?? {};
       const locale = toCanonical(attrs.locale!);
       const result = screenshotResults[i];
+      if (result.status === "rejected") {
+        console.warn(`[ASC] Screenshot fetch failed for locale ${locale}:`, result.reason);
+      }
       const screenshots = result.status === "fulfilled" ? result.value : undefined;
 
       return {
@@ -1453,6 +1455,9 @@ export class StoreApiService {
 
       const locales: PlayStoreLocaleSnapshot[] = validListings.map((listing, i) => {
         const result = screenshotResults[i];
+        if (result.status === "rejected") {
+          console.warn(`[GPC] Screenshot fetch failed for locale ${listing.language}:`, result.reason);
+        }
         const screenshots = result.status === "fulfilled" ? result.value : undefined;
 
         return {
@@ -2170,7 +2175,6 @@ export class StoreApiService {
   ): Promise<void> {
     const fileBuffer = await readFile(filePath);
     const fileName = filePath.split("/").pop() ?? "screenshot.png";
-    const sourceFileChecksum = createHash("md5").update(fileBuffer).digest("hex");
 
     const created = await client.post<AscAppScreenshotCreateResponse>("/v1/appScreenshots", {
       data: {
@@ -2178,7 +2182,6 @@ export class StoreApiService {
         attributes: {
           fileName,
           fileSize: fileBuffer.length,
-          sourceFileChecksum,
         },
         relationships: {
           appScreenshotSet: {

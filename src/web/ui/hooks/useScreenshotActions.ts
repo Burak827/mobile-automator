@@ -17,6 +17,34 @@ import {
   saveScreenshotTitleTranslations,
 } from '../services/screenshotService';
 
+function normalizeScreenshotTitleTranslationLocale(locale: string): string {
+  return locale.trim().replace(/_/g, '-');
+}
+
+function getScreenshotTitleTranslationLocalePriority(locale: string): number {
+  return locale.includes('_') ? 0 : 1;
+}
+
+function mergeScreenshotTitleTranslationEntries(
+  entries: Array<[string, Partial<Record<number, string>> | Partial<Record<1 | 2 | 3 | 4 | 5 | 6, string>>]>
+): ScreenshotTitleTranslationsMap {
+  return [...entries]
+    .sort(
+      ([leftLocale], [rightLocale]) =>
+        getScreenshotTitleTranslationLocalePriority(leftLocale) -
+        getScreenshotTitleTranslationLocalePriority(rightLocale)
+    )
+    .reduce((acc, [locale, slotTitles]) => {
+    const normalizedLocale = normalizeScreenshotTitleTranslationLocale(locale);
+    if (!normalizedLocale) return acc;
+    acc[normalizedLocale] = {
+      ...(acc[normalizedLocale] ?? {}),
+      ...(slotTitles ?? {}),
+    };
+    return acc;
+  }, {} as ScreenshotTitleTranslationsMap);
+}
+
 export function useScreenshotActions(params: {
   selectedAppId: number | null;
   pushStatus: (message: unknown) => void;
@@ -65,10 +93,9 @@ export function useScreenshotActions(params: {
 
   const loadScreenshotTitleTranslations = useCallback(async (appId: number) => {
     const payload = await fetchScreenshotTitleTranslations(appId);
-    const nextTranslations = (payload.translations ?? []).reduce((acc, entry) => {
-      acc[entry.locale] = entry.slotTitles ?? {};
-      return acc;
-    }, {} as ScreenshotTitleTranslationsMap);
+    const nextTranslations = mergeScreenshotTitleTranslationEntries(
+      (payload.translations ?? []).map((entry) => [entry.locale, entry.slotTitles ?? {}])
+    );
     setScreenshotTitleTranslations(nextTranslations);
     return nextTranslations;
   }, [setScreenshotTitleTranslations]);
@@ -130,12 +157,17 @@ export function useScreenshotActions(params: {
     translations: ScreenshotTitleTranslationsMap
   ) => {
     if (!selectedAppId) return;
-    const payload = await saveScreenshotTitleTranslations(selectedAppId, translations as Record<string, Record<number, string>>);
+    const normalizedTranslations = mergeScreenshotTitleTranslationEntries(
+      Object.entries(translations)
+    );
+    const payload = await saveScreenshotTitleTranslations(
+      selectedAppId,
+      normalizedTranslations as Record<string, Record<number, string>>
+    );
     setScreenshotTitleTranslations(
-      (payload.translations ?? []).reduce((acc, entry) => {
-        acc[entry.locale] = entry.slotTitles ?? {};
-        return acc;
-      }, {} as ScreenshotTitleTranslationsMap)
+      mergeScreenshotTitleTranslationEntries(
+        (payload.translations ?? []).map((entry) => [entry.locale, entry.slotTitles ?? {}])
+      )
     );
   }, [selectedAppId, setScreenshotTitleTranslations]);
 
@@ -232,10 +264,12 @@ export function useScreenshotActions(params: {
       }
     }
 
-    setScreenshotTitleTranslations((prev) => ({
-      ...prev,
-      ...nextTranslations,
-    }));
+    setScreenshotTitleTranslations((prev) =>
+      mergeScreenshotTitleTranslationEntries([
+        ...Object.entries(prev),
+        ...Object.entries(nextTranslations),
+      ])
+    );
     return nextTranslations;
   }, [pushStatus, selectedAppId, setScreenshotTitleTranslations]);
 

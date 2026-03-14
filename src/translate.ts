@@ -98,6 +98,8 @@ export async function translateWithOpenAI(options: {
   storeName?: string;
   appTitle?: string;
   masterPrompt?: string;
+  /** Extra context added to the system prompt (e.g. screenshot marketing context). */
+  contextHint?: string;
 }): Promise<string> {
   const { config, sourceLocale, targetLocale, text, fieldName, maxLength } = options;
   const lengthUnit = options.lengthUnit ?? "characters";
@@ -113,6 +115,7 @@ export async function translateWithOpenAI(options: {
   const masterHint = options.masterPrompt
     ? ` Additional instructions: ${options.masterPrompt}`
     : "";
+  const contextHint = options.contextHint ? ` ${options.contextHint}` : "";
 
   return requestOpenAI({
     config,
@@ -122,6 +125,7 @@ export async function translateWithOpenAI(options: {
         content:
           `You are a translation engine for ${store} listing text. ` +
           "Translate accurately, keep line breaks and formatting, and return only the translated text." +
+          contextHint +
           masterHint,
       },
       {

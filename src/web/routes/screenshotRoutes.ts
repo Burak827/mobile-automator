@@ -9,6 +9,7 @@ import {
 } from '../../translate.js';
 import {
   getScreenshotTemplateCanvasSize,
+  type ScreenshotTemplateSlot,
 } from '../screenshotTemplates/storeScreenshotTemplateRegistry.js';
 import {
   getScreenshotStoreLabel,
@@ -41,6 +42,7 @@ import {
   parseScreenshotTitleTranslationsInput,
   parseScreenshotSlot,
   parseScreenshotStoreParam,
+  normalizeScreenshotTranslationLocaleKey,
   resolveImageExtension,
   sanitizePathToken,
   serializeScreenshotUploadBatchRecord,
@@ -91,6 +93,64 @@ async function verifyWithRetry(
     }
   }
   throw lastError;
+}
+
+type ScreenshotTitleTemplateMask = {
+  maskedText: string;
+  tokens: string[];
+};
+
+const PASSTHROUGH_SCREENSHOT_TITLE_TEMPLATE_TOKENS = new Set([
+  'localeappname',
+  'applocalename',
+  'applocalizedname',
+  'localappname',
+  'empty',
+]);
+
+function mergeNormalizedScreenshotTitleTranslationEntries(
+  entries: Array<[string, Record<ScreenshotTemplateSlot, string>]>
+): Record<string, Record<ScreenshotTemplateSlot, string>> {
+  return [...entries]
+    .sort(
+      ([leftLocale], [rightLocale]) =>
+        (leftLocale.includes('_') ? 0 : 1) - (rightLocale.includes('_') ? 0 : 1)
+    )
+    .reduce((acc, [locale, titles]) => {
+      const normalizedLocale = normalizeScreenshotTranslationLocaleKey(locale);
+      if (!normalizedLocale) return acc;
+      acc[normalizedLocale] = {
+        ...(acc[normalizedLocale] ?? parseScreenshotSlotTitlesInput(undefined)),
+        ...parseScreenshotSlotTitlesInput(titles),
+      };
+      return acc;
+    }, {} as Record<string, Record<ScreenshotTemplateSlot, string>>);
+}
+
+function maskScreenshotTitleTemplateTokens(text: string): ScreenshotTitleTemplateMask {
+  const tokens: string[] = [];
+  const maskedText = text.replace(/\{\{[\s\S]*?\}\}/g, (match) => {
+    const index = tokens.push(match) - 1;
+    return `[[[SCREENSHOT_TOKEN_${index}]]]`;
+  });
+  return {
+    maskedText,
+    tokens,
+  };
+}
+
+function restoreScreenshotTitleTemplateTokens(text: string, tokens: string[]): string {
+  return text.replace(/\[\[\[SCREENSHOT_TOKEN_(\d+)\]\]\]/g, (match, rawIndex: string) => {
+    const index = Number.parseInt(rawIndex, 10);
+    return Number.isInteger(index) && tokens[index] ? tokens[index] : match;
+  });
+}
+
+function shouldPassthroughScreenshotTitleTemplate(text: string): boolean {
+  const match = text.trim().match(/^\{\{\s*([^}]+?)\s*\}\}$/);
+  if (!match) return false;
+  const compactBody = (match[1] ?? '').replace(/\s+/g, '').toLowerCase();
+  return PASSTHROUGH_SCREENSHOT_TITLE_TEMPLATE_TOKENS.has(compactBody);
 }
 
 export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
@@ -349,13 +409,16 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
       const appId = parseId(req.params.id);
       const appRow = mustGetApp(ctx.repo, appId);
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const sourceLocale = toNonEmptyString(body.sourceLocale) ?? appRow.sourceLocale ?? 'en-US';
+      const sourceLocale =
+        normalizeScreenshotTranslationLocaleKey(body.sourceLocale) ??
+        normalizeScreenshotTranslationLocaleKey(appRow.sourceLocale) ??
+        'en-US';
       const sourceTitles = parseScreenshotSlotTitlesInput(body.sourceTitles);
       const requestedLocales = Array.isArray(body.locales)
         ? body.locales
+            .map((locale) => normalizeScreenshotTranslationLocaleKey(locale))
             .filter((locale): locale is string => typeof locale === 'string')
-            .map((locale) => locale.trim())
-            .filter((locale) => locale.length > 0 && locale !== sourceLocale)
+            .filter((locale) => locale.length > 0 && locale.toLowerCase() !== sourceLocale.toLowerCase())
         : [];
       const verifyTranslations = parseBoolean(body.verify, true);
       const masterPrompt = toNonEmptyString(body.masterPrompt);
@@ -404,30 +467,65 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         sourceText: string;
         translatedText: string;
       }> = [];
-
-      ctx.repo.upsertScreenshotTitleTranslation(appId, sourceLocale, sourceTitles);
+      const persistedTranslations = mergeNormalizedScreenshotTitleTranslationEntries([
+        ...ctx.repo.listScreenshotTitleTranslations(appId).map((record) => [
+          record.locale,
+          parseScreenshotSlotTitlesInput(JSON.parse(record.titlesJson)),
+        ] as [string, Record<ScreenshotTemplateSlot, string>]),
+        [sourceLocale, sourceTitles],
+      ]);
 
       for (const locale of targetLocales) {
         const translatedSlotTitles = parseScreenshotSlotTitlesInput(undefined);
         for (const [slotKey, sourceText] of sourceEntries) {
           try {
+            if (shouldPassthroughScreenshotTitleTemplate(sourceText)) {
+              translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] = sourceText;
+              verifyQueue.push({
+                locale,
+                slot: slotKey,
+                sourceText,
+                translatedText: sourceText,
+              });
+              writeLine({
+                type: 'progress',
+                locale,
+                slot: Number(slotKey),
+                status: 'passthrough',
+              });
+              continue;
+            }
+            const templateMask = maskScreenshotTitleTemplateTokens(sourceText);
+            const sourceCharCount = templateMask.maskedText.length;
             const translated = await translateWithRetry({
               config: aiConfig,
               sourceLocale,
               targetLocale: locale,
-              text: sourceText,
+              text: templateMask.maskedText,
               fieldName: `screenshot_slot_${slotKey}_title`,
               storeName: 'Screenshot Title',
               appTitle: appRow.canonicalName,
               masterPrompt: masterPrompt || undefined,
+              contextHint:
+                'This text will be displayed on a mobile app store screenshot image for marketing purposes. ' +
+                'Space is very limited. The translated text MUST stay similar in length to the source text ' +
+                `(source is ${sourceCharCount} characters). ` +
+                'If the target language produces a longer translation, use shorter synonyms, ' +
+                'abbreviations, or rephrase creatively to keep it concise. ' +
+                'Prioritize punchy, marketing-friendly copy over literal accuracy.',
             });
+            const restoredTranslation = restoreScreenshotTitleTemplateTokens(
+              translated,
+              templateMask.tokens
+            );
 
-            translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] = translated;
+            translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] =
+              restoredTranslation;
             verifyQueue.push({
               locale,
               slot: slotKey,
               sourceText,
-              translatedText: translated,
+              translatedText: restoredTranslation,
             });
             writeLine({
               type: 'progress',
@@ -445,7 +543,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           }
         }
 
-        ctx.repo.upsertScreenshotTitleTranslation(appId, locale, translatedSlotTitles);
+        persistedTranslations[locale] = parseScreenshotSlotTitlesInput(translatedSlotTitles);
         writeLine({
           type: 'locale_done',
           locale,
@@ -503,6 +601,14 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           failed,
         });
       }
+
+      ctx.repo.replaceScreenshotTitleTranslations(
+        appId,
+        Object.entries(persistedTranslations).map(([locale, titles]) => ({
+          locale,
+          titles,
+        }))
+      );
 
       writeLine({
         type: 'done',

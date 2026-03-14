@@ -26,8 +26,10 @@ import {
   IOS_HERO_SLOT_2_SCENE_OFFSET_Y,
   IOS_HERO_SPLIT_SCENE_WIDTH_MULTIPLIER,
   buildTitleLines,
+  buildStyledTitleLines,
   drawIosSplitHeroBackdrop,
   drawIosSplitHeroSharedDecor,
+  type ScreenshotTitleTemplateContext,
   type ScreenshotCanvasImageLoader,
 } from '../../screenshotTemplates/storeScreenshotCanvas';
 import {
@@ -66,6 +68,7 @@ type RenderInput = {
   store: ScreenshotStore;
   slot: 1 | 2;
   title: string;
+  titleTemplateContext?: ScreenshotTitleTemplateContext | null;
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
@@ -143,7 +146,11 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
     throw new Error('Final canvas context alınamadı.');
   }
 
-  const titleLines = buildTitleLines(input.slot, input.title);
+  const titleLines = buildStyledTitleLines(
+    input.slot,
+    input.title,
+    input.titleTemplateContext
+  );
   const titleTypography = resolveScreenshotTitleTypography(input.store, input.slot, input.titleTypography);
   const titleLineColors = resolveScreenshotTitleLineColors(
     input.store,
@@ -249,6 +256,7 @@ export async function renderIosProceduralPosterComposite(input: {
   store: ScreenshotStore;
   slot: 3 | 4 | 5 | 6;
   title: string;
+  titleTemplateContext?: ScreenshotTitleTemplateContext | null;
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
@@ -269,7 +277,11 @@ export async function renderIosProceduralPosterComposite(input: {
     throw new Error('Final canvas context alınamadı.');
   }
 
-  const titleLines = buildTitleLines(input.slot, input.title);
+  const titleLines = buildStyledTitleLines(
+    input.slot,
+    input.title,
+    input.titleTemplateContext
+  );
   const posterTitleTypography = resolveScreenshotTitleTypography(input.store, input.slot, input.titleTypography);
   const posterTitleLineColors = resolveScreenshotTitleLineColors(
     input.store,

@@ -100,6 +100,10 @@ function toScreenshotStoreFromStoreId(store: StoreId): 'ios' | 'play_store' {
   return store === 'app_store' ? 'ios' : 'play_store';
 }
 
+function toStoreIdFromScreenshotStore(store: 'ios' | 'play_store'): StoreId {
+  return store === 'ios' ? 'app_store' : 'play_store';
+}
+
 function normalizeLocaleCatalog(rows: unknown): LocaleCatalogEntry[] {
   if (!Array.isArray(rows)) return [];
 
@@ -1321,6 +1325,31 @@ export default function App() {
     return fetchStoreTitleMap(appId, store);
   }, []);
 
+  const handleResolveScreenshotLocaleAppNames = useCallback(
+    async (screenshotStore: 'ios' | 'play_store') => {
+      if (!selectedAppId) return {} as Record<string, string>;
+
+      const store = toStoreIdFromScreenshotStore(screenshotStore);
+      const fieldKey = store === 'app_store' ? 'appName' : 'title';
+      const titleMap = await loadStoreTitleMap(selectedAppId, store);
+      const next: Record<string, string> = {};
+
+      for (const [locale, value] of titleMap.entries()) {
+        const normalizedLocale = locale.trim();
+        if (!normalizedLocale) continue;
+        next[normalizedLocale] = value.trim();
+      }
+
+      for (const change of Object.values(pendingStoreChanges)) {
+        if (change.kind !== 'field' || change.store !== store || change.field !== fieldKey) continue;
+        next[change.locale] = change.newValue.trim();
+      }
+
+      return next;
+    },
+    [loadStoreTitleMap, pendingStoreChanges, selectedAppId]
+  );
+
   const handleOpenRnLocales = useCallback(() => {
     setRnLocalesStore('app_store');
     setIsRnLocalesOpen(true);
@@ -2372,6 +2401,9 @@ export default function App() {
         }}
         onGenerateTitleTranslations={(payload) => {
           return handleGenerateScreenshotTitleTranslations(payload);
+        }}
+        onResolveLocaleAppNames={(store) => {
+          return handleResolveScreenshotLocaleAppNames(store);
         }}
         onStart={(payload) => {
           void handleGenerateScreenshot(payload);
