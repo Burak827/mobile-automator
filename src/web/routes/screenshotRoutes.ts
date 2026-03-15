@@ -54,6 +54,32 @@ import {
 
 const DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE = 'APP_IPHONE_65';
 const GENERATED_SCREENSHOT_SLOTS = [1, 2, 3, 4, 5, 6] as const;
+const SCREENSHOT_TITLE_LOCALE_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= items.length) return;
+        results[currentIndex] = await worker(items[currentIndex] as T, currentIndex);
+      }
+    })
+  );
+
+  return results;
+}
 
 async function translateWithRetry(
   args: Parameters<typeof translateWithOpenAI>[0],
@@ -98,6 +124,13 @@ async function verifyWithRetry(
 type ScreenshotTitleTemplateMask = {
   maskedText: string;
   tokens: string[];
+};
+
+type ScreenshotTitleVerifyItem = {
+  locale: string;
+  slot: string;
+  sourceText: string;
+  translatedText: string;
 };
 
 const PASSTHROUGH_SCREENSHOT_TITLE_TEMPLATE_TOKENS = new Set([
@@ -461,12 +494,6 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         totalSlots: sourceEntries.length,
       });
 
-      const verifyQueue: Array<{
-        locale: string;
-        slot: string;
-        sourceText: string;
-        translatedText: string;
-      }> = [];
       const persistedTranslations = mergeNormalizedScreenshotTitleTranslationEntries([
         ...ctx.repo.listScreenshotTitleTranslations(appId).map((record) => [
           record.locale,
@@ -475,80 +502,98 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         [sourceLocale, sourceTitles],
       ]);
 
-      for (const locale of targetLocales) {
-        const translatedSlotTitles = parseScreenshotSlotTitlesInput(undefined);
-        for (const [slotKey, sourceText] of sourceEntries) {
-          try {
-            if (shouldPassthroughScreenshotTitleTemplate(sourceText)) {
-              translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] = sourceText;
-              verifyQueue.push({
+      const localeResults = await mapWithConcurrency(
+        targetLocales,
+        SCREENSHOT_TITLE_LOCALE_CONCURRENCY,
+        async (locale) => {
+          const translatedSlotTitles = parseScreenshotSlotTitlesInput(undefined);
+          const verifyItems: ScreenshotTitleVerifyItem[] = [];
+
+          for (const [slotKey, sourceText] of sourceEntries) {
+            try {
+              if (shouldPassthroughScreenshotTitleTemplate(sourceText)) {
+                translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] = sourceText;
+                verifyItems.push({
+                  locale,
+                  slot: slotKey,
+                  sourceText,
+                  translatedText: sourceText,
+                });
+                writeLine({
+                  type: 'progress',
+                  locale,
+                  slot: Number(slotKey),
+                  status: 'passthrough',
+                });
+                continue;
+              }
+
+              const templateMask = maskScreenshotTitleTemplateTokens(sourceText);
+              const sourceCharCount = templateMask.maskedText.length;
+              const translated = await translateWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale: locale,
+                text: templateMask.maskedText,
+                fieldName: `screenshot_slot_${slotKey}_title`,
+                storeName: 'Screenshot Title',
+                appTitle: appRow.canonicalName,
+                masterPrompt: masterPrompt || undefined,
+                contextHint:
+                  'This text will be displayed on a mobile app store screenshot image for marketing purposes. ' +
+                  'Space is very limited. The translated text MUST stay similar in length to the source text ' +
+                  `(source is ${sourceCharCount} characters). ` +
+                  'If the target language produces a longer translation, use shorter synonyms, ' +
+                  'abbreviations, or rephrase creatively to keep it concise. ' +
+                  'Prioritize punchy, marketing-friendly copy over literal accuracy.',
+              });
+              const restoredTranslation = restoreScreenshotTitleTemplateTokens(
+                translated,
+                templateMask.tokens
+              );
+
+              translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] =
+                restoredTranslation;
+              verifyItems.push({
                 locale,
                 slot: slotKey,
                 sourceText,
-                translatedText: sourceText,
+                translatedText: restoredTranslation,
               });
               writeLine({
                 type: 'progress',
                 locale,
                 slot: Number(slotKey),
-                status: 'passthrough',
+                status: 'translated',
               });
-              continue;
+            } catch (error) {
+              writeLine({
+                type: 'error',
+                locale,
+                slot: Number(slotKey),
+                error: error instanceof Error ? error.message : String(error),
+              });
             }
-            const templateMask = maskScreenshotTitleTemplateTokens(sourceText);
-            const sourceCharCount = templateMask.maskedText.length;
-            const translated = await translateWithRetry({
-              config: aiConfig,
-              sourceLocale,
-              targetLocale: locale,
-              text: templateMask.maskedText,
-              fieldName: `screenshot_slot_${slotKey}_title`,
-              storeName: 'Screenshot Title',
-              appTitle: appRow.canonicalName,
-              masterPrompt: masterPrompt || undefined,
-              contextHint:
-                'This text will be displayed on a mobile app store screenshot image for marketing purposes. ' +
-                'Space is very limited. The translated text MUST stay similar in length to the source text ' +
-                `(source is ${sourceCharCount} characters). ` +
-                'If the target language produces a longer translation, use shorter synonyms, ' +
-                'abbreviations, or rephrase creatively to keep it concise. ' +
-                'Prioritize punchy, marketing-friendly copy over literal accuracy.',
-            });
-            const restoredTranslation = restoreScreenshotTitleTemplateTokens(
-              translated,
-              templateMask.tokens
-            );
-
-            translatedSlotTitles[Number(slotKey) as keyof typeof translatedSlotTitles] =
-              restoredTranslation;
-            verifyQueue.push({
-              locale,
-              slot: slotKey,
-              sourceText,
-              translatedText: restoredTranslation,
-            });
-            writeLine({
-              type: 'progress',
-              locale,
-              slot: Number(slotKey),
-              status: 'translated',
-            });
-          } catch (error) {
-            writeLine({
-              type: 'error',
-              locale,
-              slot: Number(slotKey),
-              error: error instanceof Error ? error.message : String(error),
-            });
           }
-        }
 
+          writeLine({
+            type: 'locale_done',
+            locale,
+            slotTitles: translatedSlotTitles,
+          });
+
+          return {
+            locale,
+            translatedSlotTitles,
+            verifyItems,
+          };
+        }
+      );
+
+      const verifyQueue: ScreenshotTitleVerifyItem[] = [];
+      for (const { locale, translatedSlotTitles, verifyItems } of localeResults) {
         persistedTranslations[locale] = parseScreenshotSlotTitlesInput(translatedSlotTitles);
-        writeLine({
-          type: 'locale_done',
-          locale,
-          slotTitles: translatedSlotTitles,
-        });
+        verifyQueue.push(...verifyItems);
       }
 
       if (verifyTranslations) {
@@ -557,42 +602,60 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           totalChecks: verifyQueue.length,
         });
 
-        const failed: Array<{
-          locale: string;
-          slot: number;
-          reason: string;
-          answer?: string;
-        }> = [];
-
+        const verifyItemsByLocale = new Map<string, ScreenshotTitleVerifyItem[]>();
         for (const item of verifyQueue) {
-          try {
-            const verifyResult = await verifyWithRetry({
-              config: aiConfig,
-              sourceLocale,
-              targetLocale: item.locale,
-              sourceText: item.sourceText,
-              translatedText: item.translatedText,
-              fieldName: `screenshot_slot_${item.slot}_title`,
-              storeName: 'Screenshot Title',
-              appTitle: appRow.canonicalName,
-              masterPrompt: masterPrompt || undefined,
-            });
-            if (verifyResult.verdict !== 'evet') {
-              failed.push({
-                locale: item.locale,
-                slot: Number(item.slot),
-                reason: 'AI sonucu hayir',
-                answer: verifyResult.raw,
-              });
-            }
-          } catch (error) {
-            failed.push({
-              locale: item.locale,
-              slot: Number(item.slot),
-              reason: error instanceof Error ? error.message : String(error),
-            });
-          }
+          const items = verifyItemsByLocale.get(item.locale) ?? [];
+          items.push(item);
+          verifyItemsByLocale.set(item.locale, items);
         }
+
+        const failedByLocale = await mapWithConcurrency(
+          targetLocales,
+          SCREENSHOT_TITLE_LOCALE_CONCURRENCY,
+          async (locale) => {
+            const localeFailed: Array<{
+              locale: string;
+              slot: number;
+              reason: string;
+              answer?: string;
+            }> = [];
+            const localeVerifyItems = verifyItemsByLocale.get(locale) ?? [];
+
+            for (const item of localeVerifyItems) {
+              try {
+                const verifyResult = await verifyWithRetry({
+                  config: aiConfig,
+                  sourceLocale,
+                  targetLocale: item.locale,
+                  sourceText: item.sourceText,
+                  translatedText: item.translatedText,
+                  fieldName: `screenshot_slot_${item.slot}_title`,
+                  storeName: 'Screenshot Title',
+                  appTitle: appRow.canonicalName,
+                  masterPrompt: masterPrompt || undefined,
+                });
+                if (verifyResult.verdict !== 'evet') {
+                  localeFailed.push({
+                    locale: item.locale,
+                    slot: Number(item.slot),
+                    reason: 'AI sonucu hayir',
+                    answer: verifyResult.raw,
+                  });
+                }
+              } catch (error) {
+                localeFailed.push({
+                  locale: item.locale,
+                  slot: Number(item.slot),
+                  reason: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }
+
+            return localeFailed;
+          }
+        );
+
+        const failed = failedByLocale.flat();
 
         writeLine({
           type: 'verify_done',
