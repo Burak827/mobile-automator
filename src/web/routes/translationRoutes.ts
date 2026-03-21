@@ -1,4 +1,12 @@
-import { shortenWithOpenAI, translateWithOpenAI, verifyTranslationWithOpenAI, type OpenAIConfig } from '../../translate.js';
+import { getAIProviderLabel, resolveAIConfig } from '../../aiProvider.js';
+import {
+  shortenBatchWithOpenAI,
+  shortenWithOpenAI,
+  translateBatchWithOpenAI,
+  translateWithOpenAI,
+  verifyBatchWithOpenAI,
+  verifyTranslationWithOpenAI,
+} from '../../translate.js';
 import { APP_STORE_LOCALES, PLAY_STORE_LOCALES, toCanonical } from '../localeCatalog.js';
 import { STORE_RULES, type StoreId } from '../storeRules.js';
 import type { RouteRegistrar } from '../serverHelpers.js';
@@ -57,6 +65,35 @@ function measureFieldLength(value: string, unit: 'chars' | 'bytes'): number {
   return value.length;
 }
 
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  let nextIndex = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
+}
+
 async function translateWithRetry(
   args: Parameters<typeof translateWithOpenAI>[0],
   maxRetries = 5
@@ -68,7 +105,8 @@ async function translateWithRetry(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as { status?: number }).status;
-      if (status !== 429) throw err;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
       const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
       const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
@@ -88,7 +126,8 @@ async function shortenWithRetry(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as { status?: number }).status;
-      if (status !== 429) throw err;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
       const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
       const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
@@ -108,7 +147,71 @@ async function verifyWithRetry(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as { status?: number }).status;
-      if (status !== 429) throw err;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
+    }
+  }
+  throw lastError;
+}
+
+async function translateBatchWithRetry(
+  args: Parameters<typeof translateBatchWithOpenAI>[0],
+  maxRetries = 5
+): Promise<Record<string, string>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      return await translateBatchWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
+    }
+  }
+  throw lastError;
+}
+
+async function shortenBatchWithRetry(
+  args: Parameters<typeof shortenBatchWithOpenAI>[0],
+  maxRetries = 5
+): Promise<Record<string, string>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      return await shortenBatchWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
+      const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
+    }
+  }
+  throw lastError;
+}
+
+async function verifyBatchWithRetry(
+  args: Parameters<typeof verifyBatchWithOpenAI>[0],
+  maxRetries = 5
+): Promise<Record<string, 'evet' | 'hayir'>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      return await verifyBatchWithOpenAI(args);
+    } catch (err: unknown) {
+      lastError = err;
+      const status = (err as { status?: number }).status;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
       const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
       const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
@@ -238,26 +341,22 @@ export const registerTranslationRoutes: RouteRegistrar = (router, ctx) => {
     try {
       const appId = parseId(req.params.id);
       const appRow = mustGetApp(ctx.repo, appId);
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const store = parseStoreId(
         (typeof req.query.store === 'string' ? req.query.store : undefined) ??
-          (typeof (req.body as Record<string, unknown>)?.store === 'string'
-            ? ((req.body as Record<string, unknown>).store as string)
+          (typeof body.store === 'string'
+            ? (body.store as string)
             : '')
       );
       const sourceLocale = toCanonical(appRow.sourceLocale || 'en-US') || 'en-US';
-
-      const openaiApiKey = ctx.env.openaiApiKey;
-      const openaiModel = ctx.env.openaiModel ?? 'gpt-4o-mini';
-      if (!openaiApiKey) {
-        res.status(400).json({ error: 'OPENAI_API_KEY is not configured.' });
+      let aiConfig;
+      try {
+        aiConfig = resolveAIConfig(ctx.env, body.provider);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
         return;
       }
-
-      const aiConfig: OpenAIConfig = {
-        apiKey: openaiApiKey,
-        model: openaiModel,
-        baseUrl: ctx.env.openaiBaseUrl,
-      };
+      const aiProviderLabel = getAIProviderLabel(aiConfig.provider === 'anthropic' ? 'anthropic' : 'openai');
 
       const iapRows = ctx.repo.listStoreIaps(appId, store);
       const storeLocales = ctx.repo
@@ -279,6 +378,8 @@ export const registerTranslationRoutes: RouteRegistrar = (router, ctx) => {
         type: 'start',
         store,
         sourceLocale,
+        provider: aiConfig.provider === 'anthropic' ? 'anthropic' : 'openai',
+        providerLabel: aiProviderLabel,
         totalIaps: iapRows.length,
         totalLocales: storeLocales.length,
       });
@@ -643,18 +744,15 @@ export const registerTranslationRoutes: RouteRegistrar = (router, ctx) => {
       const requestedFields = Array.isArray(body.fields)
         ? (body.fields as unknown[]).filter((field): field is string => typeof field === 'string')
         : null;
-
-      const openaiApiKey = ctx.env.openaiApiKey;
-      const openaiModel = ctx.env.openaiModel ?? 'gpt-4o-mini';
-      if (!openaiApiKey) {
-        res.status(400).json({ error: 'OPENAI_API_KEY is not configured.' });
+      let aiConfig;
+      try {
+        aiConfig = resolveAIConfig(ctx.env, body.provider);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
         return;
       }
-      const aiConfig: OpenAIConfig = {
-        apiKey: openaiApiKey,
-        model: openaiModel,
-        baseUrl: ctx.env.openaiBaseUrl,
-      };
+      const aiProvider = aiConfig.provider === 'anthropic' ? 'anthropic' : 'openai';
+      const aiProviderLabel = getAIProviderLabel(aiProvider);
 
       const sourceLocale = appRow.sourceLocale || 'en-US';
       const sourceDetailRow = ctx.repo.getStoreLocaleDetail(appId, store, sourceLocale);
@@ -713,9 +811,8 @@ export const registerTranslationRoutes: RouteRegistrar = (router, ctx) => {
         return;
       }
 
+      const storeName = STORE_RULES[store].displayName;
       const titleFieldId = store === 'app_store' ? 'appName' : 'title';
-      const otherFields = activeFields.filter((field) => field.fieldId !== titleFieldId);
-      const titleField = activeFields.find((field) => field.fieldId === titleFieldId);
 
       type LocaleWork = {
         locale: string;
@@ -763,228 +860,411 @@ export const registerTranslationRoutes: RouteRegistrar = (router, ctx) => {
         res.write(JSON.stringify(data) + '\n');
       };
 
-      writeLine({ type: 'start', totalLocales: localeWorkList.length, sourceLocale, store });
+      writeLine({
+        type: 'start',
+        totalLocales: localeWorkList.length,
+        sourceLocale,
+        store,
+        provider: aiProvider,
+        providerLabel: aiProviderLabel,
+      });
 
-      const DELAY_BETWEEN_CALLS_MS = 500;
-      const translatedFieldQueue: Array<{
+      const TRANSLATE_CONCURRENCY = store === 'play_store' ? 4 : 3;
+      const VERIFY_CONCURRENCY = store === 'play_store' ? 4 : 3;
+      const DELAY_BETWEEN_CALLS_MS = 75;
+      const existingLocaleSet = new Set(
+        ctx.repo
+          .listStoreLocales(appId)
+          .filter((row) => row.store === store)
+          .map((row) => row.locale)
+      );
+
+      type CompletedLocale = {
         locale: string;
-        field: string;
-        value: string;
+        translatedFields: Array<{ field: string; value: string; oldValue: string }>;
         appTitle?: string;
-      }> = [];
+      };
 
-      async function translateField(
-        field: TranslationField,
-        targetLocale: string,
-        appTitle?: string
-      ): Promise<{ value: string; ok: boolean }> {
-        const sourceText = sourceTexts.get(field.fieldId)!;
+      const completedLocales = (
+        await mapWithConcurrency(localeWorkList, TRANSLATE_CONCURRENCY, async (work): Promise<CompletedLocale | null> => {
+          const workFieldDefs = activeFields.filter((field) => work.workFields.includes(field.fieldId));
+          if (workFieldDefs.length === 0) return null;
 
-        let translated = await translateWithRetry({
-          config: aiConfig,
-          sourceLocale,
-          targetLocale,
-          text: sourceText,
-          fieldName: field.fieldId,
-          maxLength: field.maxChars,
-          lengthUnit: field.unit === 'bytes' ? 'bytes' : 'characters',
-          storeName: field.storeName,
-          appTitle,
-          masterPrompt: masterPrompt || undefined,
-        });
+          const oldValueByField = new Map<string, string>();
+          for (const field of workFieldDefs) {
+            oldValueByField.set(
+              field.fieldId,
+              work.targetDetail ? extractFieldValue(work.targetDetail, store, field.fieldId) : ''
+            );
+          }
 
-        let len = measureFieldLength(translated, field.unit);
+          const existingTitle = work.targetDetail
+            ? extractFieldValue(work.targetDetail, store, titleFieldId).trim()
+            : '';
+          const fieldResults = new Map<string, string>();
+          const titleFieldDef = workFieldDefs.find((field) => field.fieldId === titleFieldId);
+          const contentFieldDefs = workFieldDefs.filter((field) => field.fieldId !== titleFieldId);
 
-        writeLine({
-          type: 'progress',
-          locale: targetLocale,
-          field: field.fieldId,
-          status: 'translated',
-          chars: len,
-          maxChars: field.maxChars,
-        });
+          const recordFieldValue = (
+            field: TranslationField,
+            value: string,
+            status: 'translated' | 'shortened'
+          ): { accepted: boolean; overLimit: boolean } => {
+            const normalizedValue = value.trim();
+            if (!normalizedValue) {
+              writeLine({
+                type: 'error',
+                locale: work.locale,
+                field: field.fieldId,
+                error: `${status === 'translated' ? 'Translate' : 'Shorten'} response missing field text.`,
+              });
+              return { accepted: false, overLimit: false };
+            }
 
-        if (len > field.maxChars) {
-          translated = await shortenWithRetry({
-            config: aiConfig,
-            targetLocale,
-            text: translated,
-            fieldName: field.fieldId,
-            maxLength: field.maxChars,
-            lengthUnit: field.unit === 'bytes' ? 'bytes' : 'characters',
-            storeName: field.storeName,
-            masterPrompt: masterPrompt || undefined,
-          });
-          len = measureFieldLength(translated, field.unit);
-
-          writeLine({
-            type: 'progress',
-            locale: targetLocale,
-            field: field.fieldId,
-            status: 'shortened',
-            chars: len,
-            maxChars: field.maxChars,
-          });
-
-          if (len > field.maxChars) {
+            const len = measureFieldLength(normalizedValue, field.unit);
             writeLine({
-              type: 'error',
-              locale: targetLocale,
-              field: field.fieldId,
-              error: `Still over limit after shortening (${len}/${field.maxChars}). Skipped.`,
-            });
-            return { value: '', ok: false };
-          }
-        }
-
-        return { value: translated, ok: true };
-      }
-
-      const translatedTitles = new Map<string, string>();
-      if (titleField && sourceTexts.has(titleFieldId)) {
-        const localesNeedingTitle = localeWorkList.filter((work) => work.workFields.includes(titleFieldId));
-        for (const work of localesNeedingTitle) {
-          try {
-            const result = await translateField(titleField, work.locale);
-            if (result.ok) {
-              translatedTitles.set(work.locale, result.value);
-            }
-            await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            writeLine({ type: 'error', locale: work.locale, field: titleFieldId, error: message });
-          }
-        }
-      }
-
-      let translatedCount = 0;
-      for (const work of localeWorkList) {
-        const translatedFields: Array<{ field: string; value: string; oldValue: string }> = [];
-
-        if (translatedTitles.has(work.locale)) {
-          const oldValue = work.targetDetail
-            ? extractFieldValue(work.targetDetail, store, titleFieldId)
-            : '';
-          translatedFields.push({ field: titleFieldId, value: translatedTitles.get(work.locale)!, oldValue });
-        }
-
-        const existingTitle = work.targetDetail
-          ? extractFieldValue(work.targetDetail, store, titleFieldId).trim()
-          : '';
-        const appTitle: string | undefined =
-          translatedTitles.get(work.locale) ?? (existingTitle || undefined);
-
-        const remainingFields = work.workFields.filter((fieldId) => fieldId !== titleFieldId);
-        let skippedLocale = false;
-
-        for (const fieldId of remainingFields) {
-          const field = otherFields.find((item) => item.fieldId === fieldId);
-          if (!field) continue;
-
-          const oldValue = work.targetDetail
-            ? extractFieldValue(work.targetDetail, store, field.fieldId)
-            : '';
-
-          try {
-            const result = await translateField(field, work.locale, appTitle);
-            if (result.ok) {
-              translatedFields.push({ field: field.fieldId, value: result.value, oldValue });
-            }
-            await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            writeLine({ type: 'error', locale: work.locale, field: field.fieldId, error: message });
-            if (translatedFields.length === 0) {
-              skippedLocale = true;
-              break;
-            }
-          }
-        }
-
-        if (skippedLocale) {
-          writeLine({ type: 'locale_skip', locale: work.locale, reason: 'Translation failed' });
-          continue;
-        }
-
-        if (translatedFields.length > 0) {
-          translatedCount += 1;
-          const existsInStore = ctx.repo
-            .listStoreLocales(appId)
-            .some((row) => row.store === store && row.locale === work.locale);
-          for (const translatedField of translatedFields) {
-            translatedFieldQueue.push({
+              type: 'progress',
               locale: work.locale,
-              field: translatedField.field,
-              value: translatedField.value,
-              appTitle,
+              field: field.fieldId,
+              status,
+              chars: len,
+              maxChars: field.maxChars,
             });
+
+            if (len > field.maxChars) {
+              return { accepted: false, overLimit: true };
+            }
+
+            fieldResults.set(field.fieldId, normalizedValue);
+            return { accepted: true, overLimit: false };
+          };
+
+          if (titleFieldDef) {
+            let translatedTitle = '';
+            try {
+              translatedTitle = await translateWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale: work.locale,
+                text: sourceTexts.get(titleFieldDef.fieldId)!,
+                fieldName: titleFieldDef.fieldId,
+                maxLength: titleFieldDef.maxChars,
+                lengthUnit: titleFieldDef.unit === 'bytes' ? 'bytes' : 'characters',
+                storeName,
+                masterPrompt: masterPrompt || undefined,
+              });
+            } catch (error) {
+              if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                throw error;
+              }
+              const message = error instanceof Error ? error.message : String(error);
+              writeLine({
+                type: 'locale_skip',
+                locale: work.locale,
+                reason: `Title translation failed: ${message}`,
+              });
+              return null;
+            } finally {
+              await sleep(DELAY_BETWEEN_CALLS_MS);
+            }
+
+            const titleResult = recordFieldValue(titleFieldDef, translatedTitle, 'translated');
+            if (titleResult.overLimit) {
+              try {
+                const shortenedTitle = await shortenWithRetry({
+                  config: aiConfig,
+                  targetLocale: work.locale,
+                  text: translatedTitle,
+                  fieldName: titleFieldDef.fieldId,
+                  maxLength: titleFieldDef.maxChars,
+                  lengthUnit: titleFieldDef.unit === 'bytes' ? 'bytes' : 'characters',
+                  storeName,
+                  masterPrompt: masterPrompt || undefined,
+                });
+
+                const shortenedResult = recordFieldValue(titleFieldDef, shortenedTitle, 'shortened');
+                if (!shortenedResult.accepted) {
+                  const shortenedLen = measureFieldLength(shortenedTitle.trim(), titleFieldDef.unit);
+                  if (shortenedResult.overLimit) {
+                    writeLine({
+                      type: 'error',
+                      locale: work.locale,
+                      field: titleFieldDef.fieldId,
+                      error: `Still over limit after shortening (${shortenedLen}/${titleFieldDef.maxChars}).`,
+                    });
+                  }
+                  writeLine({
+                    type: 'locale_skip',
+                    locale: work.locale,
+                    reason: 'Localized title could not be finalized within limits.',
+                  });
+                  return null;
+                }
+              } catch (error) {
+                if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                  throw error;
+                }
+                const message = error instanceof Error ? error.message : String(error);
+                writeLine({
+                  type: 'locale_skip',
+                  locale: work.locale,
+                  reason: `Title shortening failed: ${message}`,
+                });
+                return null;
+              } finally {
+                await sleep(DELAY_BETWEEN_CALLS_MS);
+              }
+            } else if (!titleResult.accepted) {
+              writeLine({
+                type: 'locale_skip',
+                locale: work.locale,
+                reason: 'Localized title response was empty.',
+              });
+              return null;
+            }
           }
+
+          const localizedTitle = fieldResults.get(titleFieldId) ?? (existingTitle || undefined);
+
+          if (contentFieldDefs.length > 0) {
+            let translatedMap: Record<string, string> = {};
+            try {
+              translatedMap = await translateBatchWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale: work.locale,
+                fields: contentFieldDefs.map((field) => ({
+                  key: field.fieldId,
+                  text: sourceTexts.get(field.fieldId)!,
+                  maxLength: field.maxChars,
+                  lengthUnit: field.unit === 'bytes' ? 'bytes' : 'characters',
+                })),
+                storeName,
+                appTitle: localizedTitle,
+                masterPrompt: masterPrompt || undefined,
+              });
+            } catch (error) {
+              if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                throw error;
+              }
+              const message = error instanceof Error ? error.message : String(error);
+              if (fieldResults.size === 0) {
+                writeLine({ type: 'locale_skip', locale: work.locale, reason: message });
+                return null;
+              }
+              for (const field of contentFieldDefs) {
+                writeLine({
+                  type: 'error',
+                  locale: work.locale,
+                  field: field.fieldId,
+                  error: message,
+                });
+              }
+              translatedMap = {};
+            } finally {
+              await sleep(DELAY_BETWEEN_CALLS_MS);
+            }
+
+            const overLimitDefs: TranslationField[] = [];
+
+            for (const field of contentFieldDefs) {
+              const translated = translatedMap[field.fieldId]?.trim() ?? '';
+              if (!translated) {
+                if (Object.prototype.hasOwnProperty.call(translatedMap, field.fieldId)) {
+                  writeLine({
+                    type: 'error',
+                    locale: work.locale,
+                    field: field.fieldId,
+                    error: 'Batch translate response missing field text.',
+                  });
+                }
+                continue;
+              }
+
+              const fieldResult = recordFieldValue(field, translated, 'translated');
+              if (fieldResult.overLimit) {
+                overLimitDefs.push(field);
+              }
+            }
+
+            if (overLimitDefs.length > 0) {
+              try {
+                const shortenedMap = await shortenBatchWithRetry({
+                  config: aiConfig,
+                  targetLocale: work.locale,
+                  fields: overLimitDefs.map((field) => ({
+                    key: field.fieldId,
+                    text: translatedMap[field.fieldId] ?? '',
+                    maxLength: field.maxChars,
+                    lengthUnit: field.unit === 'bytes' ? 'bytes' : 'characters',
+                  })),
+                  storeName,
+                  masterPrompt: masterPrompt || undefined,
+                });
+
+                for (const field of overLimitDefs) {
+                  const shortened = shortenedMap[field.fieldId]?.trim() ?? '';
+                  const shortenedResult = recordFieldValue(field, shortened, 'shortened');
+                  if (!shortenedResult.accepted && shortenedResult.overLimit) {
+                    const shortenedLen = measureFieldLength(shortened, field.unit);
+                    writeLine({
+                      type: 'error',
+                      locale: work.locale,
+                      field: field.fieldId,
+                      error: `Still over limit after shortening (${shortenedLen}/${field.maxChars}). Skipped.`,
+                    });
+                  }
+                }
+              } catch (error) {
+                if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                  throw error;
+                }
+                const message = error instanceof Error ? error.message : String(error);
+                for (const field of overLimitDefs) {
+                  writeLine({
+                    type: 'error',
+                    locale: work.locale,
+                    field: field.fieldId,
+                    error: message,
+                  });
+                }
+              } finally {
+                await sleep(DELAY_BETWEEN_CALLS_MS);
+              }
+            }
+          }
+
+          const translatedFields = work.workFields
+            .map((fieldId) => {
+              const value = fieldResults.get(fieldId);
+              if (!value) return null;
+              return {
+                field: fieldId,
+                value,
+                oldValue: oldValueByField.get(fieldId) ?? '',
+              };
+            })
+            .filter(
+              (
+                entry
+              ): entry is {
+                field: string;
+                value: string;
+                oldValue: string;
+              } => Boolean(entry)
+            );
+
+          if (translatedFields.length === 0) {
+            writeLine({ type: 'locale_skip', locale: work.locale, reason: 'No valid fields translated' });
+            return null;
+          }
+
+          const appTitle =
+            fieldResults.get(titleFieldId) ??
+            (existingTitle || undefined);
+
           writeLine({
             type: 'locale_done',
             locale: work.locale,
-            isNewLocale: !existsInStore,
+            isNewLocale: !existingLocaleSet.has(work.locale),
             fields: translatedFields.map((field) => ({
               field: field.field,
               value: field.value,
               oldValue: field.oldValue,
             })),
           });
-        }
-      }
 
-      if (verifyTranslations) {
-        const verifyStoreName = STORE_RULES[store].displayName;
-        const verifyChecks = translatedFieldQueue.filter((item) => {
-          const sourceText = sourceTexts.get(item.field) ?? '';
-          return sourceText.trim().length > 0 && item.value.trim().length > 0;
-        });
+          return {
+            locale: work.locale,
+            translatedFields,
+            appTitle,
+          };
+        })
+      ).filter((entry): entry is CompletedLocale => Boolean(entry));
 
-        writeLine({ type: 'verify_start', totalChecks: verifyChecks.length });
+      const translatedCount = completedLocales.length;
 
-        const verifyFailed: Array<{
-          locale: string;
-          field: string;
-          reason: string;
-          answer?: string;
-        }> = [];
+      if (verifyTranslations && translatedCount > 0) {
+        const verifyChecks = completedLocales
+          .map((entry) => ({
+            locale: entry.locale,
+            appTitle: entry.appTitle,
+            fields: entry.translatedFields
+              .map((field) => {
+                const sourceText = sourceTexts.get(field.field) ?? '';
+                if (!sourceText.trim() || !field.value.trim()) return null;
+                return {
+                  key: field.field,
+                  sourceText,
+                  translatedText: field.value,
+                };
+              })
+              .filter(
+                (
+                  field
+                ): field is {
+                  key: string;
+                  sourceText: string;
+                  translatedText: string;
+                } => Boolean(field)
+              ),
+          }))
+          .filter((entry) => entry.fields.length > 0);
 
-        for (const item of verifyChecks) {
-          try {
-            const sourceText = sourceTexts.get(item.field) ?? '';
-            const verifyResult = await verifyWithRetry({
-              config: aiConfig,
-              sourceLocale,
-              targetLocale: item.locale,
-              sourceText,
-              translatedText: item.value,
-              fieldName: item.field,
-              storeName: verifyStoreName,
-              appTitle: item.appTitle,
-              masterPrompt: masterPrompt || undefined,
-            });
+        const verifyCheckCount = verifyChecks.reduce((sum, entry) => sum + entry.fields.length, 0);
 
-            if (verifyResult.verdict !== 'evet') {
-              verifyFailed.push({
-                locale: item.locale,
-                field: item.field,
-                reason: 'AI sonucu hayir',
-                answer: verifyResult.raw,
+        writeLine({ type: 'verify_start', totalChecks: verifyCheckCount });
+
+        const verifyFailed = (
+          await mapWithConcurrency(verifyChecks, VERIFY_CONCURRENCY, async (entry) => {
+            try {
+              const verdicts = await verifyBatchWithRetry({
+                config: aiConfig,
+                sourceLocale,
+                targetLocale: entry.locale,
+                fields: entry.fields,
+                storeName,
+                appTitle: entry.appTitle,
+                masterPrompt: masterPrompt || undefined,
               });
-            }
-          } catch (error) {
-            verifyFailed.push({
-              locale: item.locale,
-              field: item.field,
-              reason: error instanceof Error ? error.message : String(error),
-            });
-          }
 
-          await new Promise((resolveDelay) => setTimeout(resolveDelay, DELAY_BETWEEN_CALLS_MS));
-        }
+              const failures: Array<{
+                locale: string;
+                field: string;
+                reason: string;
+                answer?: string;
+              }> = [];
+
+              for (const field of entry.fields) {
+                if (verdicts[field.key] === 'evet') continue;
+                failures.push({
+                  locale: entry.locale,
+                  field: field.key,
+                  reason: 'AI sonucu hayir',
+                  answer: verdicts[field.key],
+                });
+              }
+
+                return failures;
+            } catch (error) {
+              if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                throw error;
+              }
+              const message = error instanceof Error ? error.message : String(error);
+              return entry.fields.map((field) => ({
+                locale: entry.locale,
+                field: field.key,
+                reason: message,
+              }));
+            } finally {
+              await sleep(DELAY_BETWEEN_CALLS_MS);
+            }
+          })
+        ).flat();
 
         writeLine({
           type: 'verify_done',
-          totalChecks: verifyChecks.length,
+          totalChecks: verifyCheckCount,
           failedCount: verifyFailed.length,
           failed: verifyFailed,
         });

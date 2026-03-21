@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { StoreId } from '../types';
+import type { AIProvider, StoreId } from '../types';
 
 export type GenerateDialogStartPayload = {
   store: StoreId;
@@ -9,6 +9,7 @@ export type GenerateDialogStartPayload = {
   selectedFields: string[];
   masterPrompt: string;
   verify: boolean;
+  provider: AIProvider;
 };
 
 export function useGenerateDialogActions(params: {
@@ -22,7 +23,8 @@ export function useGenerateDialogActions(params: {
     masterPrompt: string,
     mode: 'generate_missing' | 'update_existing',
     selectedFields: string[],
-    verify: boolean
+    verify: boolean,
+    provider: AIProvider
   ) => void;
 }) {
   const {
@@ -52,7 +54,8 @@ export function useGenerateDialogActions(params: {
       payload.masterPrompt,
       payload.mode,
       payload.selectedFields,
-      payload.verify
+      payload.verify,
+      payload.provider
     );
   }, [handleGenerateTranslations, setGenerateModalStore, setIsGenerateModalOpen]);
 

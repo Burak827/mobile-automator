@@ -1113,17 +1113,79 @@ button:hover {
   gap: 12px;
 }
 
+.generate-header-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.generate-header-copy h2 {
+  margin: 0;
+}
+
+.generate-header-copy p {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.generate-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .generate-store-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .generate-store-toggle button {
   font-size: 11px;
   padding: 4px 10px;
   border-radius: 7px;
+}
+
+.generate-provider-card {
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(182, 162, 132, 0.4);
+  background:
+    linear-gradient(135deg, rgba(255, 248, 232, 0.96), rgba(247, 236, 214, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.generate-provider-kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a7356;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.generate-provider-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(199, 178, 143, 0.35);
+}
+
+.generate-provider-switch button {
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 999px;
 }
 
 .generate-mode-toggle {
@@ -1139,11 +1201,20 @@ button:hover {
   border-radius: 7px;
 }
 
+.generate-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
 .generate-verify-check {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -1157,13 +1228,56 @@ button:hover {
   display: flex;
   gap: 8px;
   font-size: 11px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
+  flex-wrap: wrap;
 }
 
 .generate-select-actions button {
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 6px;
+}
+
+.generate-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.generate-panel {
+  border: 1px solid #ece5d6;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.generate-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.generate-panel-title {
+  display: grid;
+  gap: 4px;
+}
+
+.generate-panel-title strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.generate-panel-kicker {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
 }
 
 .generate-field-list {
@@ -1173,7 +1287,7 @@ button:hover {
   border-radius: 10px;
   background: #fff;
   padding: 6px 10px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .generate-field-item {
@@ -1206,6 +1320,12 @@ button:hover {
   padding: 6px 10px;
 }
 
+.generate-empty-panel {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .generate-locale-item {
   display: flex;
   align-items: center;
@@ -1227,18 +1347,53 @@ button:hover {
   display: inline;
 }
 
+@media (max-width: 960px) {
+  .generate-controls-row {
+    align-items: flex-start;
+  }
+
+  .generate-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .generate-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .generate-provider-card-inline {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 860px) {
+  .generate-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .generate-provider-card {
+    min-width: 0;
+  }
+
+  .generate-provider-switch {
+    flex-wrap: wrap;
+  }
+}
+
 .generate-prompt-section {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .generate-prompt-section label {
+  display: grid;
+  gap: 8px;
   font-size: 12px;
   color: var(--muted);
 }
 
 .generate-master-prompt {
   width: 100%;
-  min-height: 72px;
+  min-height: 96px;
   resize: vertical;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1249,10 +1404,23 @@ button:hover {
 }
 
 .generate-mode-info {
-  margin-top: 2px;
+  margin-top: 0;
   margin-bottom: 0;
   font-size: 12px;
   color: var(--muted);
+  line-height: 1.55;
+}
+
+.generate-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.generate-provider-card-inline {
+  min-width: 250px;
 }
 
 .generate-footer {

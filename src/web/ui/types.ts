@@ -1,4 +1,5 @@
 export type StoreId = "app_store" | "play_store";
+export type AIProvider = 'openai' | 'anthropic';
 
 export type LocaleCatalogEntry = {
   locale: string;
@@ -58,6 +59,10 @@ export type StoreRuleSet = {
 export type MetaPayload = {
   storeRules: Record<StoreId, StoreRuleSet>;
   localeCatalog: LocaleCatalogEntry[];
+  ai?: {
+    availableProviders: AIProvider[];
+    defaultProvider: AIProvider;
+  };
   guidance?: {
     publishVsSave?: string;
     references?: string[];

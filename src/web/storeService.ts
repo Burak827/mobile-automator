@@ -310,6 +310,13 @@ type GpcListingsListResponse = {
   }>;
 };
 
+type GpcListing = {
+  language?: string;
+  title?: string;
+  shortDescription?: string;
+  fullDescription?: string;
+};
+
 type AscInAppPurchasesV2Response = {
   data?: Array<{
     id: string;
@@ -2010,14 +2017,12 @@ export class StoreApiService {
 
     try {
       const gpcLocale = toStoreLocale(locale, "play_store");
-      await client.put(
-        `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`,
-        {
-          language: gpcLocale,
-          title: fields.title || "",
-          shortDescription: fields.shortDescription || "",
-          fullDescription: fields.fullDescription || "",
-        }
+      await this.upsertPlayStoreListing(
+        client,
+        packageName,
+        editId,
+        gpcLocale,
+        fields
       );
       await client.commitEdit(packageName, editId);
     } catch (error) {
@@ -2337,14 +2342,12 @@ export class StoreApiService {
     try {
       for (const entry of localesToAdd) {
         const gpcLocale = toStoreLocale(entry.locale, "play_store");
-        await client.put(
-          `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`,
-          {
-            language: gpcLocale,
-            title: entry.fields.title || "",
-            shortDescription: entry.fields.shortDescription || "",
-            fullDescription: entry.fields.fullDescription || "",
-          }
+        await this.upsertPlayStoreListing(
+          client,
+          packageName,
+          editId,
+          gpcLocale,
+          entry.fields
         );
       }
 
@@ -2358,6 +2361,65 @@ export class StoreApiService {
       await client.commitEdit(packageName, editId);
     } catch (error) {
       await client.deleteEdit(packageName, editId).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async upsertPlayStoreListing(
+    client: GpcClient,
+    packageName: string,
+    editId: string,
+    gpcLocale: string,
+    fields: Record<string, string>
+  ): Promise<void> {
+    const path = `/androidpublisher/v3/applications/${packageName}/edits/${editId}/listings/${gpcLocale}`;
+    const existing = await this.getPlayStoreListing(client, path);
+
+    if (existing) {
+      const patch: GpcListing = { language: gpcLocale };
+      if (Object.prototype.hasOwnProperty.call(fields, "title")) {
+        patch.title = fields.title;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, "shortDescription")) {
+        patch.shortDescription = fields.shortDescription;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, "fullDescription")) {
+        patch.fullDescription = fields.fullDescription;
+      }
+
+      if (Object.keys(patch).length > 1) {
+        await client.patch(path, patch);
+      }
+      return;
+    }
+
+    const missingRequired = ["title", "shortDescription", "fullDescription"].filter(
+      (field) => !fields[field]?.trim()
+    );
+    if (missingRequired.length > 0) {
+      throw new Error(
+        `Play Store locale oluşturulamadı (${gpcLocale}). Eksik zorunlu alan(lar): ${missingRequired.join(", ")}`
+      );
+    }
+
+    await client.put(path, {
+      language: gpcLocale,
+      title: fields.title,
+      shortDescription: fields.shortDescription,
+      fullDescription: fields.fullDescription,
+    });
+  }
+
+  private async getPlayStoreListing(
+    client: GpcClient,
+    path: string
+  ): Promise<GpcListing | null> {
+    try {
+      return await client.get<GpcListing>(path);
+    } catch (error) {
+      if (error instanceof Error && /\b404\b/.test(error.message)) {
+        return null;
+      }
       throw error;
     }
   }

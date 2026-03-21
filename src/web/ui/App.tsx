@@ -24,6 +24,7 @@ import { api, formatOutput } from './lib/api';
 import { fetchStoreTitleMap } from './services/localeService';
 import { uploadScreenshotBatch } from './services/screenshotService';
 import type {
+  AIProvider,
   AppConfigField,
   AppConfigForm,
   AppListItem,
@@ -102,6 +103,10 @@ function toScreenshotStoreFromStoreId(store: StoreId): 'ios' | 'play_store' {
 
 function toStoreIdFromScreenshotStore(store: 'ios' | 'play_store'): StoreId {
   return store === 'ios' ? 'app_store' : 'play_store';
+}
+
+function getAIProviderLabel(provider: AIProvider): string {
+  return provider === 'anthropic' ? 'Claude Opus' : 'ChatGPT';
 }
 
 function normalizeLocaleCatalog(rows: unknown): LocaleCatalogEntry[] {
@@ -671,11 +676,16 @@ export default function App() {
   const [isConsoleFollowEnabled, setIsConsoleFollowEnabled] = useState(true);
   const [isChangeDrawerOpen, setIsChangeDrawerOpen] = useState(false);
   const [pendingStoreChanges, setPendingStoreChanges] = useState<PendingStoreChangeMap>({});
+  const pendingStoreChangesRef = useRef<PendingStoreChangeMap>({});
   const consoleBoxRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
     selectedAppIdRef.current = selectedAppId;
   }, [selectedAppId]);
+
+  useEffect(() => {
+    pendingStoreChangesRef.current = pendingStoreChanges;
+  }, [pendingStoreChanges]);
 
   const pushStatus = useCallback((message: unknown) => {
     const now = new Date();
@@ -1031,7 +1041,10 @@ export default function App() {
   );
 
   const populateQueueFromDiff = useCallback(
-    (result: StoreDiffResponse, options?: { silent?: boolean }) => {
+    (
+      result: StoreDiffResponse,
+      options?: { silent?: boolean; summaryLabel?: string }
+    ) => {
       const silent = options?.silent ?? false;
 
       if (result.entries.length === 0) {
@@ -1047,51 +1060,51 @@ export default function App() {
       const directionLabel = result.entries[0]?.targetStore === 'play_store'
         ? 'iOS → Play Store'
         : 'Play Store → iOS';
+      const summaryLabel = options?.summaryLabel ?? `locale farkı eklendi (${directionLabel})`;
+      const next: PendingStoreChangeMap = { ...pendingStoreChangesRef.current };
+      let addedCount = 0;
 
-      setPendingStoreChanges((prev) => {
-        const next: PendingStoreChangeMap = { ...prev };
-        let addedCount = 0;
+      for (const entry of result.entries) {
+        const { targetStore, targetLocale } = entry;
 
-        for (const entry of result.entries) {
-          const { targetStore, targetLocale } = entry;
-
-          // Add locale "add" entry if new locale
-          if (entry.isNewLocale) {
-            const localeKey = toStoreLocaleChangeKey(targetStore, targetLocale);
-            if (!next[localeKey]) {
-              next[localeKey] = {
-                kind: 'locale',
-                key: localeKey,
-                store: targetStore,
-                locale: targetLocale,
-                action: 'add',
-              };
-            }
-          }
-
-          // Add field changes (only if not already in queue — queue takes priority)
-          for (const fd of entry.fields) {
-            const key = toStoreChangeKey(targetStore, targetLocale, fd.field);
-            if (next[key]) continue; // queue takes priority
-            next[key] = {
-              kind: 'field',
-              key,
+        // Add locale "add" entry if new locale
+        if (entry.isNewLocale) {
+          const localeKey = toStoreLocaleChangeKey(targetStore, targetLocale);
+          if (!next[localeKey]) {
+            next[localeKey] = {
+              kind: 'locale',
+              key: localeKey,
               store: targetStore,
               locale: targetLocale,
-              field: fd.field,
-              oldValue: fd.oldValue,
-              newValue: fd.newValue,
+              action: 'add',
             };
           }
-
-          addedCount++;
         }
 
-        if (!silent) {
-          pushStatus(`Kuyruğa ${addedCount} locale farkı eklendi (${directionLabel}).`);
+        // Add field changes (only if not already in queue — queue takes priority)
+        for (const fd of entry.fields) {
+          const key = toStoreChangeKey(targetStore, targetLocale, fd.field);
+          if (next[key]) continue; // queue takes priority
+          next[key] = {
+            kind: 'field',
+            key,
+            store: targetStore,
+            locale: targetLocale,
+            field: fd.field,
+            oldValue: fd.oldValue,
+            newValue: fd.newValue,
+          };
         }
-        return next;
-      });
+
+        addedCount++;
+      }
+
+      pendingStoreChangesRef.current = next;
+      setPendingStoreChanges(next);
+
+      if (!silent) {
+        pushStatus(`Kuyruğa ${addedCount} ${summaryLabel}.`);
+      }
 
       if (!silent && result.skipped.length > 0) {
         for (const s of result.skipped) {
@@ -1139,11 +1152,14 @@ export default function App() {
       mode?: 'generate_missing' | 'update_existing',
       fields?: string[],
       verifyEnabled = true,
+      provider: AIProvider = meta?.ai?.defaultProvider ?? 'openai',
     ) => {
       if (!selectedAppId) return;
 
       const storeName = store === 'app_store' ? 'App Store' : 'Play Store';
+      const providerLabel = getAIProviderLabel(provider);
       const isUpdate = mode === 'update_existing';
+      setIsConsoleExpanded(true);
       setIsApplyingConfig(true);
       pushStatus(
         isUpdate
@@ -1151,16 +1167,20 @@ export default function App() {
           : `✨ ${storeName} çevirileri oluşturuluyor (${locales.length} locale)...`
       );
       pushStatus(`Doğrulama: ${verifyEnabled ? 'Açık' : 'Kapalı'}`);
+      pushStatus(`Provider: ${providerLabel}`);
 
       try {
         const fetchBody: Record<string, unknown> = {
           store,
           masterPrompt: masterPrompt || undefined,
           verify: verifyEnabled,
+          provider,
         };
+        if (fields && fields.length > 0) {
+          fetchBody.fields = fields;
+        }
         if (isUpdate) {
           fetchBody.mode = 'update_existing';
-          fetchBody.fields = fields;
         } else {
           fetchBody.locales = locales;
         }
@@ -1220,6 +1240,9 @@ export default function App() {
 
             if (type === 'start') {
               pushStatus(`${event.totalLocales} locale çevrilecek (${storeName})`);
+              if (typeof event.providerLabel === 'string' && event.providerLabel.trim()) {
+                pushStatus(`AI: ${event.providerLabel.trim()}`);
+              }
             } else if (type === 'progress') {
               const status = event.status as string;
               const locale = event.locale as string;
@@ -1309,7 +1332,9 @@ export default function App() {
             })),
             skipped: [],
           };
-          populateQueueFromDiff(diffResult);
+          populateQueueFromDiff(diffResult, {
+            summaryLabel: `locale çevirisi eklendi (${storeName})`,
+          });
           setIsChangeDrawerOpen(true);
         }
       } catch (error) {
@@ -1318,7 +1343,7 @@ export default function App() {
         setIsApplyingConfig(false);
       }
     },
-    [populateQueueFromDiff, pushStatus, selectedAppId]
+    [meta?.ai?.defaultProvider, populateQueueFromDiff, pushStatus, selectedAppId]
   );
 
   const loadStoreTitleMap = useCallback(async (appId: number, store: StoreId) => {
@@ -1362,6 +1387,19 @@ export default function App() {
     setIsGenerateModalOpen,
     handleGenerateTranslations,
   });
+
+  const availableAiProviders = useMemo(() => {
+    const providers = meta?.ai?.availableProviders ?? [];
+    return providers.length > 0 ? providers : (['openai'] as AIProvider[]);
+  }, [meta?.ai?.availableProviders]);
+
+  const defaultAiProvider = useMemo(() => {
+    const configured = meta?.ai?.defaultProvider;
+    if (configured && availableAiProviders.includes(configured)) {
+      return configured;
+    }
+    return availableAiProviders[0] ?? 'openai';
+  }, [availableAiProviders, meta?.ai?.defaultProvider]);
 
   const handleOpenIapModal = useCallback(() => {
     if (showIosPanel) {
@@ -2353,6 +2391,8 @@ export default function App() {
       <GenerateTranslationsDialog
         isOpen={isGenerateModalOpen}
         store={generateModalStore}
+        availableProviders={availableAiProviders}
+        defaultProvider={defaultAiProvider}
         missingLocalesByStore={generateMissingLocalesByStore}
         existingLocalesByStore={{ app_store: iosLocales, play_store: playLocales }}
         sourceLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}

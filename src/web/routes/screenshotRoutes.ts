@@ -2,10 +2,10 @@ import type express from 'express';
 import { mkdirSync } from 'node:fs';
 import { access, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
+import { getAIProviderLabel, resolveAIConfig } from '../../aiProvider.js';
 import {
   translateWithOpenAI,
   verifyTranslationWithOpenAI,
-  type OpenAIConfig,
 } from '../../translate.js';
 import {
   getScreenshotTemplateCanvasSize,
@@ -92,7 +92,8 @@ async function translateWithRetry(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as { status?: number }).status;
-      if (status !== 429) throw err;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
       const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
       const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
@@ -112,7 +113,8 @@ async function verifyWithRetry(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as { status?: number }).status;
-      if (status !== 429) throw err;
+      const isRetryable = (err as { isRetryable?: boolean }).isRetryable;
+      if (status !== 429 || isRetryable === false) throw err;
       const retryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs;
       const delay = retryAfterMs ?? 1000 * Math.pow(2, attempt);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
@@ -455,10 +457,11 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         : [];
       const verifyTranslations = parseBoolean(body.verify, true);
       const masterPrompt = toNonEmptyString(body.masterPrompt);
-      const openaiApiKey = ctx.env.openaiApiKey;
-      const openaiModel = ctx.env.openaiModel ?? 'gpt-4o-mini';
-      if (!openaiApiKey) {
-        res.status(400).json({ error: 'OPENAI_API_KEY is not configured.' });
+      let aiConfig;
+      try {
+        aiConfig = resolveAIConfig(ctx.env, body.provider);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
         return;
       }
       const sourceEntries = Object.entries(sourceTitles).filter(([, value]) => value.trim().length > 0);
@@ -472,12 +475,6 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         return;
       }
 
-      const aiConfig: OpenAIConfig = {
-        apiKey: openaiApiKey,
-        model: openaiModel,
-        baseUrl: ctx.env.openaiBaseUrl,
-      };
-
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Transfer-Encoding', 'chunked');
@@ -490,6 +487,10 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
       writeLine({
         type: 'start',
         sourceLocale,
+        provider: aiConfig.provider === 'anthropic' ? 'anthropic' : 'openai',
+        providerLabel: getAIProviderLabel(
+          aiConfig.provider === 'anthropic' ? 'anthropic' : 'openai'
+        ),
         totalLocales: targetLocales.length,
         totalSlots: sourceEntries.length,
       });
@@ -567,6 +568,9 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
                 status: 'translated',
               });
             } catch (error) {
+              if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                throw error;
+              }
               writeLine({
                 type: 'error',
                 locale,
@@ -643,6 +647,9 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
                   });
                 }
               } catch (error) {
+                if ((error as { isQuotaExceeded?: boolean }).isQuotaExceeded) {
+                  throw error;
+                }
                 localeFailed.push({
                   locale: item.locale,
                   slot: Number(item.slot),

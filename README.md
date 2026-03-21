@@ -1,6 +1,6 @@
 # Mobile Automator (App Store Connect + Google Play)
 
-CLI and web control plane for translating and syncing store listing text with OpenAI for:
+CLI and web control plane for translating and syncing store listing text with ChatGPT or Claude for:
 - App Store Connect (name, subtitle, description, promotional text, what's new, keywords)
 - Google Play Console (title, short description, full description)
 
@@ -60,7 +60,7 @@ npm run web:api
 - Locale sync: pulls from App Store + Play and writes locales/details to SQLite
 - Locale details browsing for all synced locales
 - Queue-based change management: all changes are queued first, then committed via "Guncelle" button
-- AI translation: generate translations for all locales using OpenAI (Gen iOS / Gen Play buttons)
+- AI translation: generate translations for all locales using ChatGPT or Claude (Gen iOS / Gen Play buttons)
 - Cross-store copy: copy locale data from iOS to Play Store or Play Store to iOS
 - Apple CFBundleList JSON download for `InfoPlist.strings` generation
 - Locale add/remove/update: manage locale set and apply field-level updates per locale
@@ -138,13 +138,20 @@ npm install
 cp .env.example .env
 ```
 
-### Shared Required Env Vars
+### Shared AI Env Vars
 
+- `AI_PROVIDER` (`openai` or `anthropic`, default: first configured provider)
+
+OpenAI:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
-
-Optional shared var:
 - `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+
+Anthropic:
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL` (default: `claude-opus-4-6`)
+- `ANTHROPIC_BASE_URL` (default: `https://api.anthropic.com`)
+- `ANTHROPIC_VERSION` (default: `2023-06-01`)
 
 ### Web Env Vars
 

@@ -6,6 +6,7 @@ export type EnvConfig = {
   webPort?: string;
   webDbPath?: string;
   webEnableUi?: string;
+  aiProvider?: string;
   ascIssuerId?: string;
   ascKeyId?: string;
   ascPrivateKeyPath?: string;
@@ -32,6 +33,10 @@ export type EnvConfig = {
   openaiApiKey?: string;
   openaiModel?: string;
   openaiBaseUrl?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
+  anthropicBaseUrl?: string;
+  anthropicVersion?: string;
 };
 
 export function loadEnvConfig(): EnvConfig {
@@ -39,6 +44,7 @@ export function loadEnvConfig(): EnvConfig {
     webPort: process.env.WEB_PORT,
     webDbPath: process.env.WEB_DB_PATH,
     webEnableUi: process.env.WEB_ENABLE_UI,
+    aiProvider: process.env.AI_PROVIDER,
     ascIssuerId: process.env.ASC_ISSUER_ID,
     ascKeyId: process.env.ASC_KEY_ID,
     ascPrivateKeyPath: process.env.ASC_PRIVATE_KEY_PATH,
@@ -65,6 +71,10 @@ export function loadEnvConfig(): EnvConfig {
     openaiApiKey: process.env.OPENAI_API_KEY,
     openaiModel: process.env.OPENAI_MODEL,
     openaiBaseUrl: process.env.OPENAI_BASE_URL,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    anthropicModel: process.env.ANTHROPIC_MODEL,
+    anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
+    anthropicVersion: process.env.ANTHROPIC_VERSION,
   };
 }
 

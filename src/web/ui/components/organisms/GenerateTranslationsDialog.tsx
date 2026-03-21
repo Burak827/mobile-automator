@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDialogController } from "../../hooks/useDialogController.js";
 import Button from "../atoms/Button.js";
-import type { StoreId } from "../../types.js";
+import type { AIProvider, StoreId } from "../../types.js";
 
 type GenerateMode = "generate_missing" | "update_existing";
 
@@ -23,6 +23,8 @@ const PLAY_FIELDS = [
 type Props = {
   isOpen: boolean;
   store: StoreId;
+  availableProviders: AIProvider[];
+  defaultProvider: AIProvider;
   missingLocalesByStore: Record<StoreId, string[]>;
   existingLocalesByStore: Record<StoreId, string[]>;
   sourceLocale: string;
@@ -37,6 +39,7 @@ type Props = {
     selectedFields: string[];
     masterPrompt: string;
     verify: boolean;
+    provider: AIProvider;
   }) => void;
   isRunning: boolean;
 };
@@ -46,9 +49,16 @@ const STORE_LABEL: Record<StoreId, string> = {
   play_store: "Play Store",
 };
 
+const PROVIDER_LABEL: Record<AIProvider, string> = {
+  openai: "ChatGPT",
+  anthropic: "Claude Opus",
+};
+
 export default function GenerateTranslationsDialog({
   isOpen,
   store,
+  availableProviders,
+  defaultProvider,
   missingLocalesByStore,
   existingLocalesByStore,
   sourceLocale,
@@ -66,6 +76,7 @@ export default function GenerateTranslationsDialog({
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
   const [masterPrompt, setMasterPrompt] = useState("");
   const [verifyEnabled, setVerifyEnabled] = useState(true);
+  const [provider, setProvider] = useState<AIProvider>(defaultProvider);
   const missingLocales = useMemo(() => missingLocalesByStore[store] ?? [], [missingLocalesByStore, store]);
   const existingTargetLocales = useMemo(
     () =>
@@ -87,8 +98,9 @@ export default function GenerateTranslationsDialog({
       setSelectedFields(new Set(fields.map((field) => field.id)));
       setMasterPrompt("");
       setVerifyEnabled(true);
+      setProvider(availableProviders.includes(defaultProvider) ? defaultProvider : availableProviders[0] ?? "openai");
     }
-  }, [fields, isOpen, missingLocales, store]);
+  }, [availableProviders, defaultProvider, fields, isOpen, missingLocales, store]);
 
   const toggleLocale = useCallback((locale: string) => {
     setSelectedLocales((prev) => {
@@ -165,8 +177,10 @@ export default function GenerateTranslationsDialog({
       selectedFields: fieldIds,
       masterPrompt: masterPrompt.trim(),
       verify: verifyEnabled,
+      provider,
     });
   }, [
+    provider,
     existingTargetLocales.length,
     fields,
     masterPrompt,
@@ -183,7 +197,10 @@ export default function GenerateTranslationsDialog({
     <dialog ref={dialogRef} className="generate-dialog">
       <section className="card rules-modal">
         <div className="generate-header">
-          <h2>✨ {STORE_LABEL[store]} Çevirileri</h2>
+          <div className="generate-header-copy">
+            <h2>✨ {STORE_LABEL[store]} Çevirileri</h2>
+            <p>Kaynak locale: {sourceLocale}</p>
+          </div>
           <div className="modal-actions">
             <Button type="button" variant="danger" onClick={onClose} disabled={isRunning}>
               Kapat
@@ -191,128 +208,176 @@ export default function GenerateTranslationsDialog({
           </div>
         </div>
 
-        <div className="generate-store-toggle">
-          <Button
-            type="button"
-            variant={store === "app_store" ? "primary" : "ghost"}
-            onClick={() => onStoreChange("app_store")}
-            disabled={isRunning || !canGenerateIos}
-            title={canGenerateIos ? "App Store locale üretimi" : "ASC APP ID yok"}
-          >
-            ✨ Gen iOS
-          </Button>
-          <Button
-            type="button"
-            variant={store === "play_store" ? "primary" : "ghost"}
-            onClick={() => onStoreChange("play_store")}
-            disabled={isRunning || !canGeneratePlay}
-            title={canGeneratePlay ? "Play Store locale üretimi" : "Android package name yok"}
-          >
-            ✨ Gen Play
-          </Button>
+        <div className="generate-toolbar">
+          <div className="generate-store-toggle">
+            <Button
+              type="button"
+              variant={store === "app_store" ? "primary" : "ghost"}
+              onClick={() => onStoreChange("app_store")}
+              disabled={isRunning || !canGenerateIos}
+              title={canGenerateIos ? "App Store locale üretimi" : "ASC APP ID yok"}
+            >
+              ✨ Gen iOS
+            </Button>
+            <Button
+              type="button"
+              variant={store === "play_store" ? "primary" : "ghost"}
+              onClick={() => onStoreChange("play_store")}
+              disabled={isRunning || !canGeneratePlay}
+              title={canGeneratePlay ? "Play Store locale üretimi" : "Android package name yok"}
+            >
+              ✨ Gen Play
+            </Button>
+          </div>
         </div>
 
-        <div className="generate-mode-toggle">
-          <Button
-            type="button"
-            variant={mode === "generate_missing" ? "primary" : "ghost"}
-            onClick={() => setMode("generate_missing")}
-            disabled={isRunning}
-          >
-            Eksik Locale Üret
-          </Button>
-          <Button
-            type="button"
-            variant={mode === "update_existing" ? "primary" : "ghost"}
-            onClick={() => setMode("update_existing")}
-            disabled={isRunning}
-          >
-            Field Update
-          </Button>
-        </div>
+        <div className="generate-controls-row">
+          <div className="generate-mode-toggle">
+            <Button
+              type="button"
+              variant={mode === "generate_missing" ? "primary" : "ghost"}
+              onClick={() => setMode("generate_missing")}
+              disabled={isRunning}
+            >
+              Eksik Locale Üret
+            </Button>
+            <Button
+              type="button"
+              variant={mode === "update_existing" ? "primary" : "ghost"}
+              onClick={() => setMode("update_existing")}
+              disabled={isRunning}
+            >
+              Field Update
+            </Button>
+          </div>
 
-        <label className="generate-verify-check">
-          <input
-            type="checkbox"
-            checked={verifyEnabled}
-            onChange={(event) => setVerifyEnabled(event.target.checked)}
-            disabled={isRunning}
-          />
-          Verify
-        </label>
-
-        <div className="generate-select-actions">
-          <Button type="button" variant="ghost" onClick={selectAllFields} disabled={isRunning}>
-            Tüm Field
-          </Button>
-          <Button type="button" variant="ghost" onClick={clearFields} disabled={isRunning}>
-            Field Temizle
-          </Button>
-        </div>
-
-        <div className="generate-field-list">
-          {fields.map((field) => (
-            <div key={field.id} className="generate-field-item">
-              <input
-                type="checkbox"
-                id={`gen-field-${store}-${field.id}`}
-                checked={selectedFields.has(field.id)}
-                onChange={() => toggleField(field.id)}
-                disabled={isRunning}
-              />
-              <label htmlFor={`gen-field-${store}-${field.id}`}>{field.label}</label>
-            </div>
-          ))}
-        </div>
-
-        {mode === "generate_missing" ? (
-          missingLocales.length === 0 ? (
-            <p>Bu store için üretilecek eksik locale kalmadı.</p>
-          ) : (
-            <>
-              <div className="generate-select-actions">
-                <Button type="button" variant="ghost" onClick={selectAllLocales} disabled={isRunning}>
-                  Tüm Locale
-                </Button>
-                <Button type="button" variant="ghost" onClick={clearLocales} disabled={isRunning}>
-                  Locale Temizle
-                </Button>
-              </div>
-
-              <div className="generate-locale-list">
-                {missingLocales.map((locale) => (
-                  <div key={locale} className="generate-locale-item">
-                    <input
-                      type="checkbox"
-                      id={`gen-${store}-${locale}`}
-                      checked={selectedLocales.has(locale)}
-                      onChange={() => toggleLocale(locale)}
-                      disabled={isRunning}
-                    />
-                    <label htmlFor={`gen-${store}-${locale}`}>{locale}</label>
-                  </div>
-                ))}
-              </div>
-            </>
-          )
-        ) : (
-          <p className="generate-mode-info">
-            Field Update modu: kaynağın ({sourceLocale}) dışındaki mevcut {existingTargetLocales.length} locale güncellenecek.
-          </p>
-        )}
-
-        <div className="generate-prompt-section">
-          <label htmlFor="master-prompt">
-            Master Prompt (Opsiyonel)
-            <textarea
-              id="master-prompt"
-              className="generate-master-prompt"
-              placeholder="Örn: Resmi/formal ton kullan, marka adını çevirme, kısa ve öz yaz..."
-              value={masterPrompt}
-              onChange={(e) => setMasterPrompt(e.target.value)}
+          <label className="generate-verify-check">
+            <input
+              type="checkbox"
+              checked={verifyEnabled}
+              onChange={(event) => setVerifyEnabled(event.target.checked)}
               disabled={isRunning}
             />
+            Verify
           </label>
+        </div>
+
+        <div className="generate-workspace">
+          <section className="generate-panel">
+            <div className="generate-panel-head">
+              <div className="generate-panel-title">
+                <span className="generate-panel-kicker">Fields</span>
+                <strong>Çevrilecek Alanlar</strong>
+              </div>
+              <div className="generate-select-actions">
+                <Button type="button" variant="ghost" onClick={selectAllFields} disabled={isRunning}>
+                  Tüm Field
+                </Button>
+                <Button type="button" variant="ghost" onClick={clearFields} disabled={isRunning}>
+                  Temizle
+                </Button>
+              </div>
+            </div>
+
+            <div className="generate-field-list">
+              {fields.map((field) => (
+                <div key={field.id} className="generate-field-item">
+                  <input
+                    type="checkbox"
+                    id={`gen-field-${store}-${field.id}`}
+                    checked={selectedFields.has(field.id)}
+                    onChange={() => toggleField(field.id)}
+                    disabled={isRunning}
+                  />
+                  <label htmlFor={`gen-field-${store}-${field.id}`}>{field.label}</label>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="generate-panel">
+            <div className="generate-panel-head">
+              <div className="generate-panel-title">
+                <span className="generate-panel-kicker">
+                  {mode === "generate_missing" ? "Locales" : "Update Scope"}
+                </span>
+                <strong>
+                  {mode === "generate_missing" ? "Hedef Localeler" : "Mevcut Locale Güncellemesi"}
+                </strong>
+              </div>
+
+              {mode === "generate_missing" && missingLocales.length > 0 ? (
+                <div className="generate-select-actions">
+                  <Button type="button" variant="ghost" onClick={selectAllLocales} disabled={isRunning}>
+                    Tüm Locale
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={clearLocales} disabled={isRunning}>
+                    Temizle
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            {mode === "generate_missing" ? (
+              missingLocales.length === 0 ? (
+                <p className="generate-empty-panel">Bu store için üretilecek eksik locale kalmadı.</p>
+              ) : (
+                <div className="generate-locale-list">
+                  {missingLocales.map((locale) => (
+                    <div key={locale} className="generate-locale-item">
+                      <input
+                        type="checkbox"
+                        id={`gen-${store}-${locale}`}
+                        checked={selectedLocales.has(locale)}
+                        onChange={() => toggleLocale(locale)}
+                        disabled={isRunning}
+                      />
+                      <label htmlFor={`gen-${store}-${locale}`}>{locale}</label>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              <p className="generate-mode-info">
+                Field Update modu: kaynağın ({sourceLocale}) dışındaki mevcut {existingTargetLocales.length} locale güncellenecek.
+              </p>
+            )}
+          </section>
+        </div>
+
+        <div className="generate-bottom-grid">
+          <div className="generate-prompt-section">
+            <label htmlFor="master-prompt">
+              Master Prompt (Opsiyonel)
+              <textarea
+                id="master-prompt"
+                className="generate-master-prompt"
+                placeholder="Örn: Resmi/formal ton kullan, marka adını çevirme, kısa ve öz yaz..."
+                value={masterPrompt}
+                onChange={(e) => setMasterPrompt(e.target.value)}
+                disabled={isRunning}
+              />
+            </label>
+          </div>
+
+          {availableProviders.length > 0 ? (
+            <div className="generate-provider-card generate-provider-card-inline">
+              <span className="generate-provider-kicker">AI Engine</span>
+              <div className="generate-provider-switch">
+                {availableProviders.map((item) => (
+                  <Button
+                    key={item}
+                    type="button"
+                    variant={provider === item ? "primary" : "ghost"}
+                    onClick={() => setProvider(item)}
+                    disabled={isRunning}
+                  >
+                    {PROVIDER_LABEL[item]}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="generate-footer">

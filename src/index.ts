@@ -581,8 +581,12 @@ program
               lengthUnit: params.lengthUnit,
             });
           } catch (error) {
-            const err = error as Error & { status?: number; retryAfterMs?: number };
-            if (err.status === 429 && attempt < maxRetries) {
+            const err = error as Error & {
+              status?: number;
+              retryAfterMs?: number;
+              isRetryable?: boolean;
+            };
+            if (err.status === 429 && err.isRetryable !== false && attempt < maxRetries) {
               const backoff = retryBaseMs * Math.pow(2, attempt);
               const waitMs = err.retryAfterMs ?? backoff;
               console.log(
@@ -616,8 +620,12 @@ program
               lengthUnit: params.lengthUnit,
             });
           } catch (error) {
-            const err = error as Error & { status?: number; retryAfterMs?: number };
-            if (err.status === 429 && attempt < maxRetries) {
+            const err = error as Error & {
+              status?: number;
+              retryAfterMs?: number;
+              isRetryable?: boolean;
+            };
+            if (err.status === 429 && err.isRetryable !== false && attempt < maxRetries) {
               const backoff = retryBaseMs * Math.pow(2, attempt);
               const waitMs = err.retryAfterMs ?? backoff;
               console.log(
@@ -1107,8 +1115,9 @@ program
             const err = error as Error & {
               status?: number;
               retryAfterMs?: number;
+              isRetryable?: boolean;
             };
-            if (err.status === 429 && attempt < maxRetries) {
+            if (err.status === 429 && err.isRetryable !== false && attempt < maxRetries) {
               const backoff = retryBaseMs * Math.pow(2, attempt);
               const waitMs = err.retryAfterMs ?? backoff;
               console.log(
@@ -1144,8 +1153,9 @@ program
             const err = error as Error & {
               status?: number;
               retryAfterMs?: number;
+              isRetryable?: boolean;
             };
-            if (err.status === 429 && attempt < maxRetries) {
+            if (err.status === 429 && err.isRetryable !== false && attempt < maxRetries) {
               const backoff = retryBaseMs * Math.pow(2, attempt);
               const waitMs = err.retryAfterMs ?? backoff;
               console.log(

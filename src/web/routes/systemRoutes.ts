@@ -1,3 +1,4 @@
+import { getAvailableAIProviders, getDefaultAIProvider } from '../../aiProvider.js';
 import type { RouteRegistrar } from '../serverHelpers.js';
 import { parseBoolean } from '../serverHelpers.js';
 import { LOCALE_CATALOG } from '../localeCatalog.js';
@@ -17,6 +18,10 @@ export const registerSystemRoutes: RouteRegistrar = (router, ctx) => {
     res.json({
       storeRules: STORE_RULES,
       localeCatalog: LOCALE_CATALOG,
+      ai: {
+        availableProviders: getAvailableAIProviders(ctx.env),
+        defaultProvider: getDefaultAIProvider(ctx.env),
+      },
       guidance: {
         publishVsSave:
           'Media requirements like screenshots are strict for publish/review stages; draft saves can be less strict depending on store flow.',
