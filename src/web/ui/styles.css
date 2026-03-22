@@ -1442,6 +1442,82 @@ button:hover {
   gap: 8px;
 }
 
+.copy-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.copy-dialog-subtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.copy-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.copy-dialog-list {
+  display: grid;
+  gap: 8px;
+}
+
+.copy-dialog-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #ece5d6;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.copy-dialog-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.copy-dialog-item-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.copy-dialog-item-copy strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.copy-dialog-item-copy span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.copy-dialog-item code {
+  font-size: 10px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--brand-strong);
+  background: #f3f7f9;
+  border: 1px solid #dce8ee;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+@media (max-width: 720px) {
+  .copy-dialog-item {
+    grid-template-columns: auto 1fr;
+  }
+
+  .copy-dialog-item code {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 /* IAP Dialog */
 .iap-dialog {
   border: none;

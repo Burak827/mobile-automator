@@ -4,6 +4,10 @@ import Button from './components/atoms/Button';
 import AppDetailsPanel from './components/organisms/AppDetailsPanel';
 import AppListSidebar from './components/organisms/AppListSidebar';
 import ChangeQueueDrawer from './components/organisms/ChangeQueueDrawer';
+import CrossStoreCopyDialog, {
+  type CrossStoreCopyDirection,
+  type CrossStoreMappingOption,
+} from './components/organisms/CrossStoreCopyDialog';
 import CreateAppDialog from './components/organisms/CreateAppDialog';
 import GenerateTranslationsDialog from './components/organisms/GenerateTranslationsDialog';
 import HeaderBar from './components/organisms/HeaderBar';
@@ -595,6 +599,67 @@ type StoreDiffResponse = {
   skipped: Array<{ locale: string; reason: string }>;
 };
 
+const CROSS_STORE_COPY_OPTIONS: Record<CrossStoreCopyDirection, CrossStoreMappingOption[]> = {
+  ios_to_play: [
+    {
+      id: 'ios_appName_to_play_title',
+      sourceField: 'appName',
+      targetField: 'title',
+      sourceLabel: 'iOS App Name',
+      targetLabel: 'Play Title',
+    },
+    {
+      id: 'ios_subtitle_to_play_shortDescription',
+      sourceField: 'subtitle',
+      targetField: 'shortDescription',
+      sourceLabel: 'iOS Subtitle',
+      targetLabel: 'Play Short Description',
+    },
+    {
+      id: 'ios_description_to_play_fullDescription',
+      sourceField: 'description',
+      targetField: 'fullDescription',
+      sourceLabel: 'iOS Description',
+      targetLabel: 'Play Full Description',
+    },
+  ],
+  play_to_ios: [
+    {
+      id: 'play_title_to_ios_appName',
+      sourceField: 'title',
+      targetField: 'appName',
+      sourceLabel: 'Play Title',
+      targetLabel: 'iOS App Name',
+    },
+    {
+      id: 'play_shortDescription_to_ios_subtitle',
+      sourceField: 'shortDescription',
+      targetField: 'subtitle',
+      sourceLabel: 'Play Short Description',
+      targetLabel: 'iOS Subtitle',
+    },
+    {
+      id: 'play_fullDescription_to_ios_description',
+      sourceField: 'fullDescription',
+      targetField: 'description',
+      sourceLabel: 'Play Full Description',
+      targetLabel: 'iOS Description',
+    },
+  ],
+};
+
+function filterDiffByTargetFields(result: StoreDiffResponse, targetFields: Set<string>): StoreDiffResponse {
+  return {
+    entries: result.entries
+      .map((entry) => ({
+        ...entry,
+        fields: entry.fields.filter((field) => targetFields.has(field.field)),
+      }))
+      .filter((entry) => entry.fields.length > 0),
+    skipped: result.skipped,
+  };
+}
+
 // Raw server response types (server uses iosLocale/playLocale naming)
 type RawIosToPlayResponse = {
   entries: Array<{ iosLocale: string; playLocale: string; isNewLocale: boolean; fields: StoreDiffField[] }>;
@@ -643,6 +708,9 @@ export default function App() {
   const [isRulesOpen, setIsRulesOpen] = useState(false);
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [generateModalStore, setGenerateModalStore] = useState<StoreId>('app_store');
+  const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
+  const [copyDialogDirection, setCopyDialogDirection] = useState<CrossStoreCopyDirection>('ios_to_play');
+  const [selectedCopyMappingIds, setSelectedCopyMappingIds] = useState<Set<string>>(new Set());
   const [isIapOpen, setIsIapOpen] = useState(false);
   const [iapModalStore, setIapModalStore] = useState<StoreId>('app_store');
   const [isScreenshotsOpen, setIsScreenshotsOpen] = useState(false);
@@ -1116,33 +1184,72 @@ export default function App() {
   );
 
 
-  const handleCopyIosToPlay = useCallback(async () => {
+  const openCopyDialog = useCallback((direction: CrossStoreCopyDirection) => {
+    setCopyDialogDirection(direction);
+    setSelectedCopyMappingIds(
+      new Set(CROSS_STORE_COPY_OPTIONS[direction].map((option) => option.id))
+    );
+    setIsCopyDialogOpen(true);
+  }, []);
+
+  const toggleCopyMapping = useCallback((id: string) => {
+    setSelectedCopyMappingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAllCopyMappings = useCallback(() => {
+    setSelectedCopyMappingIds(
+      new Set(CROSS_STORE_COPY_OPTIONS[copyDialogDirection].map((option) => option.id))
+    );
+  }, [copyDialogDirection]);
+
+  const clearCopyMappings = useCallback(() => {
+    setSelectedCopyMappingIds(new Set());
+  }, []);
+
+  const handleStartCopyMapping = useCallback(async () => {
     if (!selectedAppId) return;
 
+    const options = CROSS_STORE_COPY_OPTIONS[copyDialogDirection];
+    const selectedTargetFields = new Set(
+      options
+        .filter((option) => selectedCopyMappingIds.has(option.id))
+        .map((option) => option.targetField)
+    );
+
+    if (selectedTargetFields.size === 0) return;
+
+    setIsCopyDialogOpen(false);
+
     try {
-      const raw = await api<RawIosToPlayResponse>(
-        `/api/apps/${selectedAppId}/prepare-ios-to-play`
-      );
-      populateQueueFromDiff(normalizeIosToPlayDiff(raw));
+      if (copyDialogDirection === 'ios_to_play') {
+        const raw = await api<RawIosToPlayResponse>(
+          `/api/apps/${selectedAppId}/prepare-ios-to-play`
+        );
+        populateQueueFromDiff(
+          filterDiffByTargetFields(normalizeIosToPlayDiff(raw), selectedTargetFields)
+        );
+      } else {
+        const raw = await api<RawPlayToIosResponse>(
+          `/api/apps/${selectedAppId}/prepare-play-to-ios`
+        );
+        populateQueueFromDiff(
+          filterDiffByTargetFields(normalizePlayToIosDiff(raw), selectedTargetFields)
+        );
+      }
+
       setIsChangeDrawerOpen(true);
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [populateQueueFromDiff, pushStatus, selectedAppId]);
-
-  const handleCopyPlayToIos = useCallback(async () => {
-    if (!selectedAppId) return;
-
-    try {
-      const raw = await api<RawPlayToIosResponse>(
-        `/api/apps/${selectedAppId}/prepare-play-to-ios`
-      );
-      populateQueueFromDiff(normalizePlayToIosDiff(raw));
-      setIsChangeDrawerOpen(true);
-    } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error));
-    }
-  }, [populateQueueFromDiff, pushStatus, selectedAppId]);
+  }, [copyDialogDirection, populateQueueFromDiff, pushStatus, selectedAppId, selectedCopyMappingIds]);
 
   const handleGenerateTranslations = useCallback(
     async (
@@ -1400,6 +1507,11 @@ export default function App() {
     }
     return availableAiProviders[0] ?? 'openai';
   }, [availableAiProviders, meta?.ai?.defaultProvider]);
+
+  const copyDialogOptions = useMemo(
+    () => CROSS_STORE_COPY_OPTIONS[copyDialogDirection],
+    [copyDialogDirection]
+  );
 
   const handleOpenIapModal = useCallback(() => {
     if (showIosPanel) {
@@ -2260,10 +2372,10 @@ export default function App() {
             onOpenIapModal={handleOpenIapModal}
             onOpenScreenshots={handleOpenScreenshotsModal}
             onCopyIosToPlay={() => {
-              void handleCopyIosToPlay();
+              openCopyDialog('ios_to_play');
             }}
             onCopyPlayToIos={() => {
-              void handleCopyPlayToIos();
+              openCopyDialog('play_to_ios');
             }}
             onOpenRnLocales={handleOpenRnLocales}
             onDeleteApp={() => {
@@ -2385,6 +2497,21 @@ export default function App() {
         onClose={() => setIsRulesOpen(false)}
         onReload={() => {
           void handleReloadMeta();
+        }}
+      />
+
+      <CrossStoreCopyDialog
+        isOpen={isCopyDialogOpen}
+        direction={copyDialogDirection}
+        options={copyDialogOptions}
+        selectedIds={selectedCopyMappingIds}
+        isRunning={isApplyingConfig}
+        onToggle={toggleCopyMapping}
+        onSelectAll={selectAllCopyMappings}
+        onClear={clearCopyMappings}
+        onClose={() => setIsCopyDialogOpen(false)}
+        onStart={() => {
+          void handleStartCopyMapping();
         }}
       />
 
