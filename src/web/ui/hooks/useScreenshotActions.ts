@@ -182,6 +182,9 @@ export function useScreenshotActions(params: {
       `✨ Screenshot title çevirileri oluşturuluyor (${payload.locales.length} hedef locale, kaynak: ${payload.sourceLocale})`
     );
     pushStatus(`Doğrulama: ${(payload.verify ?? true) ? 'Açık' : 'Kapalı'}`);
+    if (payload.provider) {
+      pushStatus(`AI Engine: ${payload.provider === 'anthropic' ? 'Claude Opus' : 'ChatGPT'}`);
+    }
 
     const response = await fetch(
       `/api/apps/${selectedAppId}/screenshots/generate-title-translations`,

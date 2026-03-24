@@ -2147,6 +2147,27 @@ button:hover {
   justify-content: flex-end;
 }
 
+.screenshots-title-translation-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screenshots-title-translation-provider {
+  display: grid;
+  gap: 4px;
+}
+
+.screenshots-title-translation-provider .generate-provider-switch {
+  padding: 3px;
+}
+
+.screenshots-title-translation-provider .generate-provider-switch button {
+  font-size: 10px;
+  padding: 4px 10px;
+}
+
 .screenshots-palette-grid {
   margin-top: 10px;
   display: grid;

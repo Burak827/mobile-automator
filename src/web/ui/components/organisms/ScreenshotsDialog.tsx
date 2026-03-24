@@ -90,6 +90,7 @@ import {
 import { createBrowserCanvasImageLoader } from '../../lib/browserCanvasImageLoader';
 import { GOOGLE_FONT_FAMILIES } from '../../lib/googleFontsCatalog';
 import { ensureGoogleFontsLoaded } from '../../lib/googleFontsLoader';
+import type { AIProvider } from '../../types';
 import {
   renderIosProceduralHeroComposite,
 } from '../../lib/iosProceduralHeroRenderer';
@@ -126,6 +127,7 @@ export type ScreenshotTitleTranslationGeneratePayload = {
   locales: string[];
   verify?: boolean;
   masterPrompt?: string;
+  provider?: AIProvider;
 };
 
 export type ScreenshotDialogStartPayload = {
@@ -187,6 +189,8 @@ type Props = {
   isBusy: boolean;
   defaultLocale: string;
   defaultStore?: ScreenshotStore;
+  availableAiProviders?: AIProvider[];
+  defaultAiProvider?: AIProvider;
   presets?: ScreenshotPresetMap;
   titleTranslations?: ScreenshotTitleTranslationsMap;
   onClose: () => void;
@@ -251,6 +255,13 @@ type ScreenshotZipLocaleMap = Record<
 >;
 
 type ScreenshotLocaleAppNameMap = Record<string, string>;
+
+const PROVIDER_LABEL: Record<AIProvider, string> = {
+  openai: 'ChatGPT',
+  anthropic: 'Claude Opus',
+};
+const FALLBACK_AI_PROVIDER: AIProvider = 'openai';
+const FALLBACK_AI_PROVIDERS: AIProvider[] = [FALLBACK_AI_PROVIDER];
 
 function normalizeLocaleToken(locale: string): string {
   return locale.trim().replace(/_/g, '-').toLowerCase();
@@ -933,6 +944,8 @@ export default function ScreenshotsDialog({
   isBusy,
   defaultLocale,
   defaultStore = 'ios',
+  availableAiProviders = FALLBACK_AI_PROVIDERS,
+  defaultAiProvider = FALLBACK_AI_PROVIDER,
   presets,
   titleTranslations,
   onClose,
@@ -945,6 +958,17 @@ export default function ScreenshotsDialog({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = useRef<number | null>(null);
   const titleInfoPopoverRef = useRef<HTMLDivElement | null>(null);
+  const titleTranslationProviders = useMemo<AIProvider[]>(
+    () => (availableAiProviders.length > 0 ? [...availableAiProviders] : FALLBACK_AI_PROVIDERS),
+    [availableAiProviders]
+  );
+  const resolvedDefaultTitleTranslationProvider = useMemo<AIProvider>(
+    () =>
+      titleTranslationProviders.includes(defaultAiProvider)
+        ? defaultAiProvider
+        : titleTranslationProviders[0] ?? FALLBACK_AI_PROVIDER,
+    [defaultAiProvider, titleTranslationProviders]
+  );
   const [store, setStore] = useState<ScreenshotStore>('ios');
   const [slot, setSlot] = useState<ScreenshotTemplateSlot>(1);
   const [sourceLocale, setSourceLocale] = useState<string>('en_US');
@@ -952,6 +976,9 @@ export default function ScreenshotsDialog({
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isTitleInfoOpen, setIsTitleInfoOpen] = useState(false);
+  const [titleTranslationProvider, setTitleTranslationProvider] = useState<AIProvider>(
+    resolvedDefaultTitleTranslationProvider
+  );
   const [titleTranslationsState, setTitleTranslationsState] = useState<ScreenshotTitleTranslationsMap>({});
   const [localeAppNamesByStore, setLocaleAppNamesByStore] = useState<
     Record<ScreenshotStore, ScreenshotLocaleAppNameMap>
@@ -1181,6 +1208,11 @@ export default function ScreenshotsDialog({
     resizePointerIdRef.current = event.pointerId;
     setIsResizingSidebar(true);
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setTitleTranslationProvider(resolvedDefaultTitleTranslationProvider);
+  }, [isOpen, resolvedDefaultTitleTranslationProvider]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -2361,6 +2393,7 @@ export default function ScreenshotsDialog({
           sourceTitles,
           locales: titleTranslationTargetLocales,
           verify: true,
+          provider: titleTranslationProvider,
         })
       );
       if (nextTranslations && typeof nextTranslations === 'object') {
@@ -2369,7 +2402,14 @@ export default function ScreenshotsDialog({
     } finally {
       setIsGeneratingTitleTranslations(false);
     }
-  }, [onGenerateTitleTranslations, sourceLocaleKey, sourceLocaleTitleMap, titleTranslationSourceSlots, titleTranslationTargetLocales]);
+  }, [
+    onGenerateTitleTranslations,
+    sourceLocaleKey,
+    sourceLocaleTitleMap,
+    titleTranslationProvider,
+    titleTranslationSourceSlots,
+    titleTranslationTargetLocales,
+  ]);
 
   const handleHeroPhonePoseChange = useCallback(
     (key: keyof IosHeroPhonePose, value: number) => {
@@ -3562,24 +3602,42 @@ export default function ScreenshotsDialog({
         <div className="generate-footer">
           <span className="generate-footer-info">{outputPath}</span>
           <div className="generate-footer-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={!canGenerateTitleTranslations}
-              onClick={() => {
-                void handleGenerateCurrentTitleTranslations().catch((error) => {
-                  setFilePreviewErrorsByStore((prev) => ({
-                    ...prev,
-                    [store]: {
-                      ...prev[store],
-                      [slot]: error instanceof Error ? error.message : String(error),
-                    },
-                  }));
-                });
-              }}
-            >
-              {isGeneratingTitleTranslations ? 'Çevriliyor...' : 'Title Çevirilerini Oluştur'}
-            </Button>
+            <div className="screenshots-title-translation-actions">
+              <div className="screenshots-title-translation-provider">
+                <span className="generate-provider-kicker">AI Engine</span>
+                <div className="generate-provider-switch">
+                  {titleTranslationProviders.map((provider) => (
+                    <Button
+                      key={provider}
+                      type="button"
+                      variant={titleTranslationProvider === provider ? 'primary' : 'ghost'}
+                      onClick={() => setTitleTranslationProvider(provider)}
+                      disabled={isLocked || isGeneratingTitleTranslations}
+                    >
+                      {PROVIDER_LABEL[provider]}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={!canGenerateTitleTranslations}
+                onClick={() => {
+                  void handleGenerateCurrentTitleTranslations().catch((error) => {
+                    setFilePreviewErrorsByStore((prev) => ({
+                      ...prev,
+                      [store]: {
+                        ...prev[store],
+                        [slot]: error instanceof Error ? error.message : String(error),
+                      },
+                    }));
+                  });
+                }}
+              >
+                {isGeneratingTitleTranslations ? 'Çevriliyor...' : 'Title Çevirilerini Oluştur'}
+              </Button>
+            </div>
             <Button
               type="button"
               variant="ghost"

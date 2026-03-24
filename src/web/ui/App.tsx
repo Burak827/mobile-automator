@@ -2554,6 +2554,8 @@ export default function App() {
         isBusy={isGeneratingScreenshot}
         defaultLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}
         defaultStore={showIosPanel ? 'ios' : 'play_store'}
+        availableAiProviders={availableAiProviders}
+        defaultAiProvider={defaultAiProvider}
         presets={screenshotPresets}
         titleTranslations={screenshotTitleTranslations}
         onClose={() => {
