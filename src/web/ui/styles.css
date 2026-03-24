@@ -1733,18 +1733,7 @@ button:hover {
   line-height: 1.4;
 }
 
-.screenshot-store-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.screenshot-store-toggle button {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 7px;
-}
+/* (old store/device toggles replaced by .screenshot-toolbar) */
 
 .screenshots-modal {
   height: 100%;
@@ -1752,6 +1741,60 @@ button:hover {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0;
   overflow: hidden;
+}
+
+/* ── Screenshot toolbar (store + device toggles) ── */
+.screenshot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.screenshot-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px;
+  background: rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+}
+
+.screenshot-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.screenshot-toggle-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.screenshot-toggle-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.screenshot-toggle-btn.active {
+  background: rgba(243, 130, 25, 0.18);
+  color: #f38219;
+}
+
+.screenshot-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .screenshots-modal > .generate-footer {

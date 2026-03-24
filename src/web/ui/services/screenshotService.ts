@@ -12,6 +12,7 @@ import type {
 } from '../components/organisms/ScreenshotsDialog';
 import {
   getScreenshotStoreEndpointSegment,
+  type IosScreenshotDeviceFamily,
   type ScreenshotStore,
 } from '../../screenshotTemplates/screenshotStores';
 
@@ -109,13 +110,17 @@ export async function fetchScreenshotUploadBatches(
 
 export async function uploadScreenshotBatch(
   appId: number,
-  store: ScreenshotStore
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
 ): Promise<ScreenshotUploadBatchApplyResponse> {
   const endpointSegment = getScreenshotStoreEndpointSegment(store);
   return api<ScreenshotUploadBatchApplyResponse>(
     `/api/apps/${appId}/screenshots/${endpointSegment}/upload-batch`,
     {
       method: 'POST',
+      body: JSON.stringify(
+        iosDeviceFamily ? { iosDeviceFamily } : {}
+      ),
     }
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Button from '../atoms/Button';
 import type { PendingStoreChange, ScreenshotUploadBatchPayload, StoreId } from '../../types';
+import { getScreenshotTargetLabel } from '../../../screenshotTemplates/screenshotStores';
 
 function formatStoreLabel(store: StoreId): string {
   if (store === 'app_store') return 'iOS';
@@ -146,9 +147,9 @@ export default function ChangeQueueDrawer({
                   <div className="changes-drawer-group-head">Screenshot Batch</div>
                   <ul className="change-list">
                     {screenshotBatches.map((batch) => (
-                      <li key={`${batch.store}-${batch.updatedAt}`} className="change-item">
+                      <li key={`${batch.store}-${batch.iosDeviceFamily ?? 'default'}-${batch.updatedAt}`} className="change-item">
                         <div className="change-item-head">
-                          <strong>{batch.store === 'ios' ? 'iOS' : 'Play'}</strong>
+                          <strong>{getScreenshotTargetLabel(batch.store, batch.iosDeviceFamily)}</strong>
                           <span className="change-batch-status">{batch.status}</span>
                         </div>
                         <div className="change-field">

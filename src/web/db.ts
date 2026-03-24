@@ -2,7 +2,11 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { type StoreId } from "./storeRules.js";
-import { type ScreenshotStore } from "./screenshotTemplates/screenshotStores.js";
+import {
+  resolveIosScreenshotDeviceFamily,
+  type IosScreenshotDeviceFamily,
+  type ScreenshotStore,
+} from "./screenshotTemplates/screenshotStores.js";
 
 export type AppRecord = {
   id: number;
@@ -87,6 +91,7 @@ export type ScreenshotTitleTranslationRecord = {
 export type ScreenshotUploadBatchRecord = {
   appId: number;
   store: ScreenshotStore;
+  iosDeviceFamily?: IosScreenshotDeviceFamily;
   status: "pending" | "uploading" | "failed";
   localesJson: string;
   createdAt: string;
@@ -221,9 +226,16 @@ function parseScreenshotTitleTranslationRow(
 function parseScreenshotUploadBatchRow(
   row: Record<string, unknown>
 ): ScreenshotUploadBatchRecord {
+  const store = String(row.store) as ScreenshotStore;
   return {
     appId: Number(row.app_id),
-    store: String(row.store) as ScreenshotStore,
+    store,
+    iosDeviceFamily:
+      store === "ios"
+        ? resolveIosScreenshotDeviceFamily(
+            typeof row.ios_device_family === "string" ? row.ios_device_family : undefined
+          )
+        : undefined,
     status: String(row.status) as ScreenshotUploadBatchRecord["status"],
     localesJson: String(row.locales_json ?? "[]"),
     createdAt: String(row.created_at),
@@ -349,12 +361,13 @@ export class MobileAutomatorRepository {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         app_id INTEGER NOT NULL,
         store TEXT NOT NULL CHECK (store IN ('ios', 'play_store')),
+        ios_device_family TEXT NOT NULL DEFAULT 'default',
         status TEXT NOT NULL CHECK (status IN ('pending', 'uploading', 'failed')),
         locales_json TEXT NOT NULL,
         error_message TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(app_id, store),
+        UNIQUE(app_id, store, ios_device_family),
         FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
       );
 
@@ -363,7 +376,7 @@ export class MobileAutomatorRepository {
       CREATE INDEX IF NOT EXISTS idx_store_iaps_app_store ON store_iaps(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_screenshot_presets_app ON screenshot_presets(app_id, store);
       CREATE INDEX IF NOT EXISTS idx_screenshot_title_translations_app ON screenshot_title_translations(app_id, locale);
-      CREATE INDEX IF NOT EXISTS idx_screenshot_upload_batches_app ON screenshot_upload_batches(app_id, store);
+      CREATE INDEX IF NOT EXISTS idx_screenshot_upload_batches_app ON screenshot_upload_batches(app_id, store, ios_device_family);
       CREATE INDEX IF NOT EXISTS idx_naming_overrides_app ON naming_overrides(app_id);
       CREATE INDEX IF NOT EXISTS idx_sync_jobs_app ON sync_jobs(app_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sync_job_logs_job ON sync_job_logs(job_id, created_at ASC);
@@ -374,6 +387,7 @@ export class MobileAutomatorRepository {
       "app_store_keywords",
       "ALTER TABLE naming_overrides ADD COLUMN app_store_keywords TEXT"
     );
+    this.ensureScreenshotUploadBatchSchema();
   }
 
   private ensureColumn(tableName: string, columnName: string, addSql: string): void {
@@ -384,6 +398,102 @@ export class MobileAutomatorRepository {
     if (!exists) {
       this.db.exec(addSql);
     }
+  }
+
+  private ensureScreenshotUploadBatchSchema(): void {
+    const columns = this.db
+      .prepare("PRAGMA table_info(screenshot_upload_batches)")
+      .all() as Array<Record<string, unknown>>;
+    const hasIosDeviceFamily = columns.some((row) => String(row.name) === "ios_device_family");
+
+    const uniqueIndexes = this.db
+      .prepare("PRAGMA index_list(screenshot_upload_batches)")
+      .all() as Array<Record<string, unknown>>;
+    const hasCompositeUnique = uniqueIndexes.some((indexRow) => {
+      if (Number(indexRow.unique) !== 1) return false;
+      const indexName = String(indexRow.name ?? "");
+      if (!indexName) return false;
+      const indexColumns = this.db
+        .prepare(`PRAGMA index_info(${JSON.stringify(indexName)})`)
+        .all() as Array<Record<string, unknown>>;
+      const names = indexColumns.map((row) => String(row.name ?? ""));
+      return (
+        names.length === 3 &&
+        names[0] === "app_id" &&
+        names[1] === "store" &&
+        names[2] === "ios_device_family"
+      );
+    });
+
+    if (hasIosDeviceFamily && hasCompositeUnique) {
+      this.db
+        .prepare(
+          `UPDATE screenshot_upload_batches
+           SET ios_device_family = CASE
+             WHEN store = 'ios' THEN 'iphone'
+             ELSE 'default'
+           END
+           WHERE ios_device_family IS NULL
+              OR trim(ios_device_family) = ''
+              OR ios_device_family = 'default'`
+        )
+        .run();
+      return;
+    }
+
+    this.db.exec(`
+      ALTER TABLE screenshot_upload_batches RENAME TO screenshot_upload_batches_legacy;
+
+      CREATE TABLE screenshot_upload_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL,
+        store TEXT NOT NULL CHECK (store IN ('ios', 'play_store')),
+        ios_device_family TEXT NOT NULL DEFAULT 'default',
+        status TEXT NOT NULL CHECK (status IN ('pending', 'uploading', 'failed')),
+        locales_json TEXT NOT NULL,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(app_id, store, ios_device_family),
+        FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+      );
+
+      INSERT INTO screenshot_upload_batches (
+        app_id,
+        store,
+        ios_device_family,
+        status,
+        locales_json,
+        error_message,
+        created_at,
+        updated_at
+      )
+      SELECT
+        app_id,
+        store,
+        CASE
+          WHEN store = 'ios' THEN 'iphone'
+          ELSE 'default'
+        END,
+        status,
+        locales_json,
+        error_message,
+        created_at,
+        updated_at
+      FROM screenshot_upload_batches_legacy;
+
+      DROP TABLE screenshot_upload_batches_legacy;
+
+      CREATE INDEX IF NOT EXISTS idx_screenshot_upload_batches_app
+      ON screenshot_upload_batches(app_id, store, ios_device_family);
+    `);
+  }
+
+  private resolveScreenshotUploadBatchDeviceFamilyToken(
+    store: ScreenshotStore,
+    iosDeviceFamily?: IosScreenshotDeviceFamily
+  ): string {
+    return store === "ios" ? resolveIosScreenshotDeviceFamily(iosDeviceFamily) : "default";
   }
 
   close(): void {
@@ -830,10 +940,10 @@ export class MobileAutomatorRepository {
   listScreenshotUploadBatches(appId: number): ScreenshotUploadBatchRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT app_id, store, status, locales_json, error_message, created_at, updated_at
+        `SELECT app_id, store, ios_device_family, status, locales_json, error_message, created_at, updated_at
          FROM screenshot_upload_batches
          WHERE app_id = ?
-         ORDER BY store ASC`
+         ORDER BY store ASC, ios_device_family ASC`
       )
       .all(appId) as Array<Record<string, unknown>>;
     return rows.map(parseScreenshotUploadBatchRow);
@@ -841,15 +951,20 @@ export class MobileAutomatorRepository {
 
   getScreenshotUploadBatch(
     appId: number,
-    store: ScreenshotStore
+    store: ScreenshotStore,
+    iosDeviceFamily?: IosScreenshotDeviceFamily
   ): ScreenshotUploadBatchRecord | undefined {
+    const deviceFamilyToken = this.resolveScreenshotUploadBatchDeviceFamilyToken(
+      store,
+      iosDeviceFamily
+    );
     const row = this.db
       .prepare(
-        `SELECT app_id, store, status, locales_json, error_message, created_at, updated_at
+        `SELECT app_id, store, ios_device_family, status, locales_json, error_message, created_at, updated_at
          FROM screenshot_upload_batches
-         WHERE app_id = ? AND store = ?`
+         WHERE app_id = ? AND store = ? AND ios_device_family = ?`
       )
-      .get(appId, store) as Record<string, unknown> | undefined;
+      .get(appId, store, deviceFamilyToken) as Record<string, unknown> | undefined;
     if (!row) return undefined;
     return parseScreenshotUploadBatchRow(row);
   }
@@ -857,9 +972,14 @@ export class MobileAutomatorRepository {
   upsertScreenshotUploadBatch(
     appId: number,
     store: ScreenshotStore,
-    locales: string[]
+    locales: string[],
+    iosDeviceFamily?: IosScreenshotDeviceFamily
   ): ScreenshotUploadBatchRecord {
-    const existing = this.getScreenshotUploadBatch(appId, store);
+    const deviceFamilyToken = this.resolveScreenshotUploadBatchDeviceFamilyToken(
+      store,
+      iosDeviceFamily
+    );
+    const existing = this.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
     const existingLocales = Array.isArray(parseJsonSafe(existing?.localesJson))
       ? ((parseJsonSafe(existing?.localesJson) as string[]).map((locale) => locale.trim()).filter(Boolean))
       : [];
@@ -871,22 +991,29 @@ export class MobileAutomatorRepository {
     this.db
       .prepare(
         `INSERT INTO screenshot_upload_batches (
-           app_id, store, status, locales_json, error_message, created_at, updated_at
+           app_id, store, ios_device_family, status, locales_json, error_message, created_at, updated_at
          )
-         VALUES (?, ?, 'pending', ?, NULL, ?, ?)
-         ON CONFLICT(app_id, store) DO UPDATE SET
+         VALUES (?, ?, ?, 'pending', ?, NULL, ?, ?)
+         ON CONFLICT(app_id, store, ios_device_family) DO UPDATE SET
            status = 'pending',
            locales_json = excluded.locales_json,
            error_message = NULL,
            updated_at = excluded.updated_at`
       )
-      .run(appId, store, JSON.stringify(nextLocales), existing?.createdAt ?? now, now);
+      .run(
+        appId,
+        store,
+        deviceFamilyToken,
+        JSON.stringify(nextLocales),
+        existing?.createdAt ?? now,
+        now
+      );
 
     this.db
       .prepare("UPDATE apps SET updated_at = ? WHERE id = ?")
       .run(now, appId);
 
-    return this.getScreenshotUploadBatch(appId, store)!;
+    return this.getScreenshotUploadBatch(appId, store, iosDeviceFamily)!;
   }
 
   replaceScreenshotUploadBatchLocales(
@@ -894,25 +1021,30 @@ export class MobileAutomatorRepository {
     store: ScreenshotStore,
     locales: string[],
     status: ScreenshotUploadBatchRecord["status"] = "pending",
-    errorMessage?: string
+    errorMessage?: string,
+    iosDeviceFamily?: IosScreenshotDeviceFamily
   ): ScreenshotUploadBatchRecord | undefined {
     const nextLocales = Array.from(
       new Set(locales.map((locale) => locale.trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
     if (nextLocales.length === 0) {
-      this.deleteScreenshotUploadBatch(appId, store);
+      this.deleteScreenshotUploadBatch(appId, store, iosDeviceFamily);
       return undefined;
     }
 
-    const existing = this.getScreenshotUploadBatch(appId, store);
+    const deviceFamilyToken = this.resolveScreenshotUploadBatchDeviceFamilyToken(
+      store,
+      iosDeviceFamily
+    );
+    const existing = this.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
     const now = nowIso();
     this.db
       .prepare(
         `INSERT INTO screenshot_upload_batches (
-           app_id, store, status, locales_json, error_message, created_at, updated_at
+           app_id, store, ios_device_family, status, locales_json, error_message, created_at, updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(app_id, store) DO UPDATE SET
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(app_id, store, ios_device_family) DO UPDATE SET
            status = excluded.status,
            locales_json = excluded.locales_json,
            error_message = excluded.error_message,
@@ -921,6 +1053,7 @@ export class MobileAutomatorRepository {
       .run(
         appId,
         store,
+        deviceFamilyToken,
         status,
         JSON.stringify(nextLocales),
         toOptionalString(errorMessage),
@@ -928,13 +1061,18 @@ export class MobileAutomatorRepository {
         now
       );
 
-    return this.getScreenshotUploadBatch(appId, store);
+    return this.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
   }
 
   markScreenshotUploadBatchUploading(
     appId: number,
-    store: ScreenshotStore
+    store: ScreenshotStore,
+    iosDeviceFamily?: IosScreenshotDeviceFamily
   ): ScreenshotUploadBatchRecord | undefined {
+    const deviceFamilyToken = this.resolveScreenshotUploadBatchDeviceFamilyToken(
+      store,
+      iosDeviceFamily
+    );
     const now = nowIso();
     this.db
       .prepare(
@@ -942,31 +1080,49 @@ export class MobileAutomatorRepository {
          SET status = 'uploading',
              error_message = NULL,
              updated_at = ?
-         WHERE app_id = ? AND store = ?`
+         WHERE app_id = ? AND store = ? AND ios_device_family = ?`
       )
-      .run(now, appId, store);
-    return this.getScreenshotUploadBatch(appId, store);
+      .run(now, appId, store, deviceFamilyToken);
+    return this.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
   }
 
   markScreenshotUploadBatchFailed(
     appId: number,
     store: ScreenshotStore,
     errorMessage: string,
-    locales?: string[]
+    locales?: string[],
+    iosDeviceFamily?: IosScreenshotDeviceFamily
   ): ScreenshotUploadBatchRecord | undefined {
-    const existing = this.getScreenshotUploadBatch(appId, store);
+    const existing = this.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
     const nextLocales = locales
       ? locales
       : Array.isArray(parseJsonSafe(existing?.localesJson))
         ? ((parseJsonSafe(existing?.localesJson) as string[]).map((locale) => locale.trim()).filter(Boolean))
         : [];
-    return this.replaceScreenshotUploadBatchLocales(appId, store, nextLocales, "failed", errorMessage);
+    return this.replaceScreenshotUploadBatchLocales(
+      appId,
+      store,
+      nextLocales,
+      "failed",
+      errorMessage,
+      iosDeviceFamily
+    );
   }
 
-  deleteScreenshotUploadBatch(appId: number, store: ScreenshotStore): void {
+  deleteScreenshotUploadBatch(
+    appId: number,
+    store: ScreenshotStore,
+    iosDeviceFamily?: IosScreenshotDeviceFamily
+  ): void {
+    const deviceFamilyToken = this.resolveScreenshotUploadBatchDeviceFamilyToken(
+      store,
+      iosDeviceFamily
+    );
     this.db
-      .prepare("DELETE FROM screenshot_upload_batches WHERE app_id = ? AND store = ?")
-      .run(appId, store);
+      .prepare(
+        "DELETE FROM screenshot_upload_batches WHERE app_id = ? AND store = ? AND ios_device_family = ?"
+      )
+      .run(appId, store, deviceFamilyToken);
   }
 
   listNamingOverrides(appId: number): NamingRecord[] {

@@ -27,6 +27,7 @@ import { useSyncActions } from './hooks/useSyncActions';
 import { api, formatOutput } from './lib/api';
 import { fetchStoreTitleMap } from './services/localeService';
 import { uploadScreenshotBatch } from './services/screenshotService';
+import { getScreenshotTargetLabel } from '../screenshotTemplates/screenshotStores';
 import type {
   AIProvider,
   AppConfigField,
@@ -2273,11 +2274,16 @@ export default function App() {
 
         for (const batch of screenshotBatchTargets) {
           const targetStore = batch.store === 'ios' ? 'app_store' : 'play_store';
+          const batchLabel = getScreenshotTargetLabel(batch.store, batch.iosDeviceFamily);
           pushStatus(
-            `🖼 ${batch.store === 'ios' ? 'iOS' : 'Play Store'} screenshot upload başlatıldı (${batch.locales.length} locale).`
+            `🖼 ${batchLabel} screenshot upload başlatıldı (${batch.locales.length} locale).`
           );
           try {
-            const uploadResult = await uploadScreenshotBatch(selectedAppId, batch.store);
+            const uploadResult = await uploadScreenshotBatch(
+              selectedAppId,
+              batch.store,
+              batch.iosDeviceFamily
+            );
             pushStatus(uploadResult.message);
             for (const locale of uploadResult.uploadedLocales) {
               pushStatus(`  Upload tamamlandı: ${locale}`);

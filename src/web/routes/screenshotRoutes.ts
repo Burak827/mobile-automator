@@ -8,12 +8,15 @@ import {
   verifyTranslationWithOpenAI,
 } from '../../translate.js';
 import {
+  getActiveScreenshotTemplateSlots,
   getScreenshotTemplateCanvasSize,
   type ScreenshotTemplateSlot,
 } from '../screenshotTemplates/storeScreenshotTemplateRegistry.js';
 import {
-  getScreenshotStoreLabel,
+  getScreenshotTargetLabel,
   getScreenshotStorePathToken,
+  resolveIosScreenshotDeviceFamily,
+  type IosScreenshotDeviceFamily,
   type ScreenshotStore,
 } from '../screenshotTemplates/screenshotStores.js';
 import type { RouteRegistrar } from '../serverHelpers.js';
@@ -53,8 +56,10 @@ import {
   toProjectRelativePath,
 } from '../serverHelpers.js';
 
-const DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE = 'APP_IPHONE_65';
-const GENERATED_SCREENSHOT_SLOTS = [1, 2, 3, 4, 5, 6] as const;
+const DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE_BY_FAMILY: Record<IosScreenshotDeviceFamily, string> = {
+  iphone: 'APP_IPHONE_65',
+  ipad: 'APP_IPAD_PRO_3GEN_129',
+};
 const SCREENSHOT_TITLE_LOCALE_CONCURRENCY = 5;
 
 async function mapWithConcurrency<T, R>(
@@ -324,7 +329,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
             'screenshots',
             'output',
             `app-${appId}`,
-            getScreenshotStorePathToken(record.store)
+            getScreenshotOutputPathToken(record.store, record.iosDeviceFamily)
           )
         ),
       }));
@@ -339,7 +344,10 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
       const appId = parseId(req.params.id);
       const appRow = mustGetApp(ctx.repo, appId);
       const store = parseScreenshotStoreParam(req.params.store);
-      const batch = ctx.repo.getScreenshotUploadBatch(appId, store);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const iosDeviceFamily =
+        store === 'ios' ? resolveIosScreenshotDeviceFamily(body.iosDeviceFamily) : undefined;
+      const batch = ctx.repo.getScreenshotUploadBatch(appId, store, iosDeviceFamily);
       if (!batch) {
         res.status(400).json({ error: 'Upload bekleyen screenshot batch bulunamadı.' });
         return;
@@ -354,26 +362,29 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
             .sort((a, b) => a.localeCompare(b))
         : [];
       if (locales.length === 0) {
-        ctx.repo.deleteScreenshotUploadBatch(appId, store);
+        ctx.repo.deleteScreenshotUploadBatch(appId, store, iosDeviceFamily);
         res.status(400).json({ error: 'Batch içinde locale bulunamadı.' });
         return;
       }
 
-      ctx.repo.markScreenshotUploadBatchUploading(appId, store);
+      ctx.repo.markScreenshotUploadBatchUploading(appId, store, iosDeviceFamily);
 
       const fileDiscovery = await Promise.all(
         locales.map(async (locale) => ({
           locale,
-          filePaths: await collectGeneratedScreenshotFilePaths(appId, store, locale),
+          filePaths: await collectGeneratedScreenshotFilePaths(appId, store, locale, iosDeviceFamily),
         }))
       );
+      const expectedSlots = getGeneratedScreenshotSlots(store, iosDeviceFamily);
 
-      const readyLocaleFiles = fileDiscovery.filter((entry) => entry.filePaths.length === GENERATED_SCREENSHOT_SLOTS.length);
+      const readyLocaleFiles = fileDiscovery.filter(
+        (entry) => entry.filePaths.length === expectedSlots.length
+      );
       const preflightFailed = fileDiscovery
-        .filter((entry) => entry.filePaths.length !== GENERATED_SCREENSHOT_SLOTS.length)
+        .filter((entry) => entry.filePaths.length !== expectedSlots.length)
         .map((entry) => ({
           locale: entry.locale,
-          error: `Eksik output bulundu (${entry.filePaths.length}/${GENERATED_SCREENSHOT_SLOTS.length}).`,
+          error: `Eksik output bulundu (${entry.filePaths.length}/${expectedSlots.length}).`,
         }));
 
       const outputRoot = toProjectRelativePath(
@@ -383,7 +394,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           'screenshots',
           'output',
           `app-${appId}`,
-          getScreenshotStorePathToken(store)
+          getScreenshotOutputPathToken(store, iosDeviceFamily)
         )
       );
 
@@ -392,11 +403,13 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           appId,
           store,
           'Upload için hazır locale bulunamadı.',
-          preflightFailed.map((entry) => entry.locale)
+          preflightFailed.map((entry) => entry.locale),
+          iosDeviceFamily
         );
         res.status(400).json({
           appId,
           store,
+          iosDeviceFamily,
           uploadedLocales: [],
           failedLocales: preflightFailed,
           outputRoot,
@@ -409,7 +422,11 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         store === 'ios'
           ? await ctx.storeApi.uploadAppStoreGeneratedScreenshots({
               app: appRow,
-              displayType: resolvePreferredAscScreenshotDisplayType(ctx.repo, appId),
+              displayType: resolvePreferredAscScreenshotDisplayType(
+                ctx.repo,
+                appId,
+                iosDeviceFamily
+              ),
               localeFiles: readyLocaleFiles,
             })
           : await ctx.storeApi.uploadPlayStoreGeneratedScreenshots({
@@ -423,22 +440,24 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
           appId,
           store,
           failedLocales.map((entry) => `${entry.locale}: ${entry.error}`).join(' | '),
-          failedLocales.map((entry) => entry.locale)
+          failedLocales.map((entry) => entry.locale),
+          iosDeviceFamily
         );
       } else {
-        ctx.repo.deleteScreenshotUploadBatch(appId, store);
+        ctx.repo.deleteScreenshotUploadBatch(appId, store, iosDeviceFamily);
       }
 
       res.json({
         appId,
         store,
+        iosDeviceFamily,
         uploadedLocales: uploadResult.uploadedLocales,
         failedLocales,
         outputRoot,
         message:
           failedLocales.length === 0
-            ? `${getScreenshotStoreLabel(store)} screenshot upload tamamlandı (${uploadResult.uploadedLocales.length} locale).`
-            : `${getScreenshotStoreLabel(store)} screenshot upload kısmi tamamlandı (${uploadResult.uploadedLocales.length} başarılı, ${failedLocales.length} hatalı).`,
+            ? `${getScreenshotTargetLabel(store, iosDeviceFamily)} screenshot upload tamamlandı (${uploadResult.uploadedLocales.length} locale).`
+            : `${getScreenshotTargetLabel(store, iosDeviceFamily)} screenshot upload kısmi tamamlandı (${uploadResult.uploadedLocales.length} başarılı, ${failedLocales.length} hatalı).`,
       });
     } catch (error) {
       next(error);
@@ -734,7 +753,8 @@ async function fileExists(path: string): Promise<boolean> {
 async function collectGeneratedScreenshotFilePaths(
   appId: number,
   store: ScreenshotStore,
-  locale: string
+  locale: string,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
 ): Promise<string[]> {
   const localeToken = sanitizePathToken(locale || 'en-US') || 'en-US';
   const baseDir = resolve(
@@ -743,11 +763,11 @@ async function collectGeneratedScreenshotFilePaths(
     'screenshots',
     'output',
     `app-${appId}`,
-    getScreenshotStorePathToken(store),
+    getScreenshotOutputPathToken(store, iosDeviceFamily),
     localeToken
   );
   const files: string[] = [];
-  for (const slot of GENERATED_SCREENSHOT_SLOTS) {
+  for (const slot of getGeneratedScreenshotSlots(store, iosDeviceFamily)) {
     const path = join(baseDir, `${slot}.png`);
     if (await fileExists(path)) {
       files.push(path);
@@ -758,7 +778,8 @@ async function collectGeneratedScreenshotFilePaths(
 
 function resolvePreferredAscScreenshotDisplayType(
   repo: Parameters<RouteRegistrar>[1]['repo'],
-  appId: number
+  appId: number,
+  iosDeviceFamily: IosScreenshotDeviceFamily = 'iphone'
 ): string {
   const details = repo.listStoreLocaleDetails(appId, 'app_store');
   for (const detail of details) {
@@ -771,10 +792,12 @@ function resolvePreferredAscScreenshotDisplayType(
         group && typeof group === 'object'
           ? toNonEmptyString((group as Record<string, unknown>).displayType)
           : undefined;
-      if (displayType) return displayType;
+      if (displayType && getAscScreenshotDisplayTypeFamily(displayType) === iosDeviceFamily) {
+        return displayType;
+      }
     }
   }
-  return DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE;
+  return DEFAULT_ASC_SCREENSHOT_DISPLAY_TYPE_BY_FAMILY[iosDeviceFamily];
 }
 
 async function handleScreenshotGenerateRequest(
@@ -786,6 +809,8 @@ async function handleScreenshotGenerateRequest(
   const appId = parseId(Array.isArray(req.params.id) ? req.params.id[0] ?? '' : req.params.id);
   const appRow = mustGetApp(ctx.repo, appId);
   const body = (req.body ?? {}) as Record<string, unknown>;
+  const iosDeviceFamily =
+    store === 'ios' ? resolveIosScreenshotDeviceFamily(body.iosDeviceFamily) : undefined;
 
   const slot = parseScreenshotSlot(body.slot);
   const locale = toNonEmptyString(body.locale) ?? toNonEmptyString(appRow.sourceLocale) ?? 'en-US';
@@ -860,10 +885,10 @@ async function handleScreenshotGenerateRequest(
 
   const localeToken = sanitizePathToken(locale || 'en-US') || 'en-US';
   const extension = resolveImageExtension(fileName, mimeType);
-  const storePathToken = getScreenshotStorePathToken(store);
   const screenshotsRoot = resolve(process.cwd(), 'data', 'screenshots');
-  const stagedDir = join(screenshotsRoot, 'staging', `app-${appId}`, storePathToken, localeToken);
-  const outputDir = join(screenshotsRoot, 'output', `app-${appId}`, storePathToken, localeToken);
+  const outputPathToken = getScreenshotOutputPathToken(store, iosDeviceFamily);
+  const stagedDir = join(screenshotsRoot, 'staging', `app-${appId}`, outputPathToken, localeToken);
+  const outputDir = join(screenshotsRoot, 'output', `app-${appId}`, outputPathToken, localeToken);
   mkdirSync(stagedDir, { recursive: true });
   mkdirSync(outputDir, { recursive: true });
 
@@ -893,14 +918,16 @@ async function handleScreenshotGenerateRequest(
     heroCameraSettings,
   });
 
-  const localeFilePaths = await collectGeneratedScreenshotFilePaths(appId, store, locale);
-  if (localeFilePaths.length === GENERATED_SCREENSHOT_SLOTS.length) {
-    ctx.repo.upsertScreenshotUploadBatch(appId, store, [locale]);
+  const expectedSlots = getGeneratedScreenshotSlots(store, iosDeviceFamily);
+  const localeFilePaths = await collectGeneratedScreenshotFilePaths(appId, store, locale, iosDeviceFamily);
+  if (localeFilePaths.length === expectedSlots.length) {
+    ctx.repo.upsertScreenshotUploadBatch(appId, store, [locale], iosDeviceFamily);
   }
 
   res.status(201).json({
     appId,
     store,
+    iosDeviceFamily,
     locale,
     slot,
     title,
@@ -916,12 +943,37 @@ async function handleScreenshotGenerateRequest(
     heroCameraSettings,
     stagedInputPath: toProjectRelativePath(stagedInputPath),
     outputPath: toProjectRelativePath(outputPath),
-    message: `Screenshot üretildi (${storePathToken}/${locale}/slot-${slot}).`,
+    message: `Screenshot üretildi (${outputPathToken}/${locale}/slot-${slot}).`,
     renderer: {
       template: store === 'ios' && slot <= 2 ? 'procedural-ios-hero' : 'browser-rendered',
       engine: rendererMode ?? 'browser-rendered',
       runtime: 'browser',
-      canvasSize: getScreenshotTemplateCanvasSize(store),
+      canvasSize: getScreenshotTemplateCanvasSize(store, iosDeviceFamily),
     },
   });
+}
+
+function getGeneratedScreenshotSlots(
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): ScreenshotTemplateSlot[] {
+  return getActiveScreenshotTemplateSlots(store, iosDeviceFamily);
+}
+
+function getScreenshotOutputPathToken(
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): string {
+  if (store !== 'ios') return getScreenshotStorePathToken(store);
+  return `${getScreenshotStorePathToken(store)}/${resolveIosScreenshotDeviceFamily(iosDeviceFamily)}`;
+}
+
+function getAscScreenshotDisplayTypeFamily(
+  displayType: string
+): IosScreenshotDeviceFamily | undefined {
+  const normalized = displayType.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized.includes('IPAD')) return 'ipad';
+  if (normalized.includes('IPHONE')) return 'iphone';
+  return undefined;
 }

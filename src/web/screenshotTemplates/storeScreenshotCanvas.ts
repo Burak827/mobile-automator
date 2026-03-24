@@ -34,7 +34,7 @@ import {
   resolveSlot1SbeSettings,
   type Slot1SbeSettings,
 } from './slot1Sbe.js';
-import type { ScreenshotStore } from './screenshotStores.js';
+import type { IosScreenshotDeviceFamily, ScreenshotStore } from './screenshotStores.js';
 
 export type ScreenshotCanvasImageSource = string | Uint8Array | null | undefined;
 export type ScreenshotCanvasImageLoader = (
@@ -74,29 +74,29 @@ const SCREEN_PLACEHOLDER_SURFACE = '#ddd7d0';
  * proportional text across different canvas sizes.
  * iOS canvas height is the reference (scale = 1.0).
  */
-function getStoreFontScale(store: ScreenshotStore): number {
-  const canvasHeight = getScreenshotTemplateCanvasSize(store).height;
+function getCanvasFontScale(canvasHeight: number): number {
   return canvasHeight / VARIANT3_IOS_CANVAS_HEIGHT;
 }
 
-function scaledFontSize(store: ScreenshotStore, fontSize: number): number {
-  return Math.round(fontSize * getStoreFontScale(store));
+function scaledFontSize(canvasHeight: number, fontSize: number): number {
+  return Math.round(fontSize * getCanvasFontScale(canvasHeight));
 }
 
-function scaledLineGap(store: ScreenshotStore, gap: unknown): number {
+function scaledLineGap(canvasHeight: number, gap: unknown): number {
   const numeric = Number(gap);
   if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * getStoreFontScale(store));
+  return Math.round(numeric * getCanvasFontScale(canvasHeight));
 }
 
-function scaledTopPadding(store: ScreenshotStore, padding: unknown): number {
+function scaledTopPadding(canvasHeight: number, padding: unknown): number {
   const numeric = Number(padding);
   if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * getStoreFontScale(store));
+  return Math.round(numeric * getCanvasFontScale(canvasHeight));
 }
 
 export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
+  iosDeviceFamily?: IosScreenshotDeviceFamily | null;
   slot: ScreenshotTemplateSlot;
   title: string;
   titleTemplateContext?: ScreenshotTitleTemplateContext | null;
@@ -122,7 +122,10 @@ export async function drawStoreScreenshotToContext(
   loadImage: ScreenshotCanvasImageLoader,
   input: StoreScreenshotCanvasInput
 ): Promise<{ width: number; height: number; palette: ScreenshotTemplatePalette }> {
-  const canvasSize = getScreenshotTemplateCanvasSize(input.store);
+  const canvasSize = getScreenshotTemplateCanvasSize(
+    input.store,
+    input.iosDeviceFamily ?? undefined
+  );
   const palette = resolveScreenshotTemplatePalette(input.store, input.palette);
   const titleLines = buildStyledTitleLines(input.slot, input.title, input.titleTemplateContext);
   const titleTypography = resolveScreenshotTitleTypography(
@@ -317,16 +320,16 @@ export function drawIosSplitHeroBackdrop(
     drawSlot1SbeEffect(ctx, input.slot1SbeSettings);
   }
 
-  const iosFontSize = scaledFontSize('ios', input.titleTypography.fontSize);
+  const iosFontSize = scaledFontSize(height, input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
-    y: IOS_TITLE_BLOCK_Y + scaledTopPadding('ios', input.titleTopPadding),
+    y: IOS_TITLE_BLOCK_Y + scaledTopPadding(height, input.titleTopPadding),
     maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: iosFontSize,
     lineHeight: getTitleLineHeight('ios', input.slot, iosFontSize),
-    lineGap: scaledLineGap('ios', input.titleLineGap),
+    lineGap: scaledLineGap(height, input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
@@ -436,16 +439,16 @@ export function drawIosPosterBackdrop(
   );
   ctx.fillRect(0, 0, width, height);
 
-  const iosFontSize2 = scaledFontSize('ios', input.titleTypography.fontSize);
+  const iosFontSize2 = scaledFontSize(height, input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
-    y: IOS_TITLE_BLOCK_Y + scaledTopPadding('ios', input.titleTopPadding),
+    y: IOS_TITLE_BLOCK_Y + scaledTopPadding(height, input.titleTopPadding),
     maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: iosFontSize2,
     lineHeight: getTitleLineHeight('ios', input.slot, iosFontSize2),
-    lineGap: scaledLineGap('ios', input.titleLineGap),
+    lineGap: scaledLineGap(height, input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
@@ -573,16 +576,16 @@ export function drawPlayStoreSplitHeroBackdrop(
     drawSlot1SbeEffect(ctx, input.slot1SbeSettings);
   }
 
-  const playFontSize = scaledFontSize('play_store', input.titleTypography.fontSize);
+  const playFontSize = scaledFontSize(height, input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
-    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding('play_store', input.titleTopPadding),
+    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding(height, input.titleTopPadding),
     maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: playFontSize,
     lineHeight: getTitleLineHeight('play_store', input.slot, playFontSize),
-    lineGap: scaledLineGap('play_store', input.titleLineGap),
+    lineGap: scaledLineGap(height, input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,
@@ -666,16 +669,16 @@ export function drawPlayStorePosterBackdrop(
   );
   ctx.fillRect(0, 0, width, height);
 
-  const playFontSize2 = scaledFontSize('play_store', input.titleTypography.fontSize);
+  const playFontSize2 = scaledFontSize(height, input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
-    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding('play_store', input.titleTopPadding),
+    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding(height, input.titleTopPadding),
     maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
     fontSize: playFontSize2,
     lineHeight: getTitleLineHeight('play_store', input.slot, playFontSize2),
-    lineGap: scaledLineGap('play_store', input.titleLineGap),
+    lineGap: scaledLineGap(height, input.titleLineGap),
     weight: input.titleTypography.fontWeight,
     lineColors: input.titleLineColors,
     color: palette.bgInk,

@@ -22,7 +22,9 @@ import {
   DEFAULT_PROCEDURAL_CAMERA_SETTINGS,
   DEFAULT_IOS_HERO_PHONE_LOCATION,
   DEFAULT_IOS_HERO_PHONE_POSE,
+  getDefaultProceduralCameraSettings,
   getDefaultProceduralDeviceShape,
+  getDefaultTitleTopPadding,
   proceduralKeyLightPositionFromSettings,
   resolveProceduralCameraMode,
   resolveProceduralCameraSettings,
@@ -74,6 +76,7 @@ import {
   type Slot1SbeSettings,
 } from '../../../screenshotTemplates/slot1Sbe';
 import {
+  getActiveScreenshotTemplateSlots,
   getScreenshotTemplateCanvasSize,
   getScreenshotTemplateDefaultPalette,
   getScreenshotTemplatePaletteFields,
@@ -83,8 +86,12 @@ import {
   type ScreenshotTemplateSlot,
 } from '../../../screenshotTemplates/storeScreenshotTemplateRegistry';
 import {
+  IOS_SCREENSHOT_DEVICE_FAMILIES,
   SCREENSHOT_STORES,
+  getIosScreenshotDeviceFamilyLabel,
   getScreenshotStorePathToken,
+  resolveIosScreenshotDeviceFamily,
+  type IosScreenshotDeviceFamily,
   type ScreenshotStore,
 } from '../../../screenshotTemplates/screenshotStores';
 import { createBrowserCanvasImageLoader } from '../../lib/browserCanvasImageLoader';
@@ -132,6 +139,7 @@ export type ScreenshotTitleTranslationGeneratePayload = {
 
 export type ScreenshotDialogStartPayload = {
   store: ScreenshotStore;
+  iosDeviceFamily?: IosScreenshotDeviceFamily;
   locale: string;
   slot: ScreenshotTemplateSlot;
   title: string;
@@ -207,6 +215,7 @@ type Props = {
 
 type PreviewCardProps = {
   store: ScreenshotStore;
+  iosDeviceFamily?: IosScreenshotDeviceFamily;
   slot: ScreenshotTemplateSlot;
   title: string;
   titleTemplateContext?: ScreenshotTitleTemplateContext | null;
@@ -262,6 +271,12 @@ const PROVIDER_LABEL: Record<AIProvider, string> = {
 };
 const FALLBACK_AI_PROVIDER: AIProvider = 'openai';
 const FALLBACK_AI_PROVIDERS: AIProvider[] = [FALLBACK_AI_PROVIDER];
+
+function formatSlotRangeLabel(slots: ScreenshotTemplateSlot[]): string {
+  if (slots.length === 0) return '';
+  if (slots.length === 1) return String(slots[0]);
+  return `${slots[0]}-${slots[slots.length - 1]}`;
+}
 
 function normalizeLocaleToken(locale: string): string {
   return locale.trim().replace(/_/g, '-').toLowerCase();
@@ -814,6 +829,7 @@ function drawCanvasError(canvas: HTMLCanvasElement, message: string): void {
 
 const PreviewCanvasCard = memo(function PreviewCanvasCard({
   store,
+  iosDeviceFamily,
   slot,
   title,
   titleTemplateContext,
@@ -841,7 +857,10 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
 }: PreviewCardProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderIdRef = useRef(0);
-  const canvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
+  const canvasSize = useMemo(
+    () => getScreenshotTemplateCanvasSize(store, iosDeviceFamily),
+    [iosDeviceFamily, store]
+  );
   const previewWidth = canvasSize.width;
   const previewHeight = canvasSize.height;
 
@@ -900,6 +919,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
 
         await drawStoreScreenshotToContext(ctx, imageLoader, {
           store,
+          iosDeviceFamily,
           slot,
           title,
           titleTemplateContext,
@@ -921,7 +941,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
     })();
 
     return () => { /* renderIdRef check guards stale renders */ };
-  }, [backgroundSettings, fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleCenter, titleExtraLineColors, titleLineGap, titleTemplateContext, titleTopPadding, titleTypography]);
+  }, [backgroundSettings, fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, iosDeviceFamily, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleCenter, titleExtraLineColors, titleLineGap, titleTemplateContext, titleTopPadding, titleTypography]);
 
   return (
     <button
@@ -976,6 +996,7 @@ export default function ScreenshotsDialog({
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isTitleInfoOpen, setIsTitleInfoOpen] = useState(false);
+  const [iosDeviceFamily, setIosDeviceFamily] = useState<IosScreenshotDeviceFamily>('iphone');
   const [titleTranslationProvider, setTitleTranslationProvider] = useState<AIProvider>(
     resolvedDefaultTitleTranslationProvider
   );
@@ -1068,7 +1089,7 @@ export default function ScreenshotsDialog({
     play_store: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
   });
   const [heroPhoneShapeByStore, setHeroPhoneShapeByStore] = useState<Record<ScreenshotStore, IosHeroPhoneShape | null>>({
-    ios: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios')),
+    ios: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios', iosDeviceFamily), iosDeviceFamily),
     play_store: resolveProceduralDeviceShapeForStore(
       'play_store',
       getDefaultProceduralDeviceShape('play_store')
@@ -1098,6 +1119,81 @@ export default function ScreenshotsDialog({
     ios: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
     play_store: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
   });
+  // ── Per-device-family cache (iPhone vs iPad keep independent hero settings) ──
+  type IosDeviceFamilyHeroCache = {
+    heroPhonePose: IosHeroPhonePose | null;
+    heroPhoneShape: IosHeroPhoneShape | null;
+    heroPhoneLocation: ProceduralDeviceLocation | null;
+    heroKeyLightPosition: ProceduralLightPosition | null;
+    heroKeyLightSettings: ProceduralKeyLightSettings | null;
+    slotSbeSettings: ScreenshotSlotSbeMap;
+    heroCameraMode: ProceduralCameraMode | null;
+    heroCameraSettings: ProceduralCameraSettings | null;
+    titleTopPadding: ScreenshotSlotTitleTopPaddingMap;
+  };
+  const iosDeviceFamilyCacheRef = useRef<Partial<Record<IosScreenshotDeviceFamily, IosDeviceFamilyHeroCache>>>({});
+  const prevIosDeviceFamilyRef = useRef(iosDeviceFamily);
+
+  const switchIosDeviceFamily = useCallback((nextFamily: IosScreenshotDeviceFamily) => {
+    const prevFamily = prevIosDeviceFamilyRef.current;
+    if (nextFamily === prevFamily) return;
+
+    // Save current iOS hero state for the outgoing family
+    iosDeviceFamilyCacheRef.current[prevFamily] = {
+      heroPhonePose: heroPhonePoseByStore.ios,
+      heroPhoneShape: heroPhoneShapeByStore.ios,
+      heroPhoneLocation: heroPhoneLocationByStore.ios,
+      heroKeyLightPosition: heroKeyLightPositionByStore.ios,
+      heroKeyLightSettings: heroKeyLightSettingsByStore.ios,
+      slotSbeSettings: slotSbeSettingsByStore.ios,
+      heroCameraMode: heroCameraModeByStore.ios,
+      heroCameraSettings: heroCameraSettingsByStore.ios,
+      titleTopPadding: titleTopPaddingByStore.ios,
+    };
+
+    // Restore cached state for the incoming family, or use defaults
+    const cached = iosDeviceFamilyCacheRef.current[nextFamily];
+    if (cached) {
+      setHeroPhonePoseByStore((prev) => ({ ...prev, ios: cached.heroPhonePose }));
+      setHeroPhoneShapeByStore((prev) => ({ ...prev, ios: cached.heroPhoneShape }));
+      setHeroPhoneLocationByStore((prev) => ({ ...prev, ios: cached.heroPhoneLocation }));
+      setHeroKeyLightPositionByStore((prev) => ({ ...prev, ios: cached.heroKeyLightPosition }));
+      setHeroKeyLightSettingsByStore((prev) => ({ ...prev, ios: cached.heroKeyLightSettings }));
+      setSlotSbeSettingsByStore((prev) => ({ ...prev, ios: cached.slotSbeSettings }));
+      setHeroCameraModeByStore((prev) => ({ ...prev, ios: cached.heroCameraMode }));
+      setHeroCameraSettingsByStore((prev) => ({ ...prev, ios: cached.heroCameraSettings }));
+      setTitleTopPaddingByStore((prev) => ({ ...prev, ios: cached.titleTopPadding }));
+    } else {
+      // First time switching to this family — apply defaults
+      setHeroPhonePoseByStore((prev) => ({ ...prev, ios: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE) }));
+      setHeroPhoneShapeByStore((prev) => ({
+        ...prev,
+        ios: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios', nextFamily), nextFamily),
+      }));
+      setHeroPhoneLocationByStore((prev) => ({ ...prev, ios: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION) }));
+      setHeroKeyLightPositionByStore((prev) => ({ ...prev, ios: resolveProceduralLightPosition() }));
+      setHeroKeyLightSettingsByStore((prev) => ({ ...prev, ios: resolveProceduralKeyLightSettings() }));
+      setSlotSbeSettingsByStore((prev) => ({ ...prev, ios: createDefaultSlotSbeMap() }));
+      setHeroCameraModeByStore((prev) => ({ ...prev, ios: resolveProceduralCameraMode(DEFAULT_PROCEDURAL_CAMERA_MODE) }));
+      setHeroCameraSettingsByStore((prev) => ({
+        ...prev,
+        ios: resolveProceduralCameraSettings(getDefaultProceduralCameraSettings(nextFamily)),
+      }));
+      const defaultTopPad = getDefaultTitleTopPadding(nextFamily);
+      setTitleTopPaddingByStore((prev) => ({
+        ...prev,
+        ios: { 1: defaultTopPad, 2: defaultTopPad, 3: defaultTopPad, 4: defaultTopPad, 5: defaultTopPad, 6: defaultTopPad },
+      }));
+    }
+
+    prevIosDeviceFamilyRef.current = nextFamily;
+    setIosDeviceFamily(nextFamily);
+  }, [
+    heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore,
+    heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore,
+    heroPhoneShapeByStore, slotSbeSettingsByStore, titleTopPaddingByStore,
+  ]);
+
   const [panelState, setPanelState] = useState({
     rotation: false,
     color: false,
@@ -1134,7 +1230,7 @@ export default function ScreenshotsDialog({
       slotTitleTypography: createSlotTitleTypographyMap('ios'),
       slotBackgroundSettings: createDefaultScreenshotBackgroundSettingsMap(),
       heroPhonePose: resolveIosHeroPhonePose(DEFAULT_IOS_HERO_PHONE_POSE),
-      heroPhoneShape: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios')),
+      heroPhoneShape: resolveProceduralDeviceShapeForStore('ios', getDefaultProceduralDeviceShape('ios'), iosDeviceFamily),
       heroPhoneLocation: resolveIosHeroPhoneLocation(DEFAULT_IOS_HERO_PHONE_LOCATION),
       heroKeyLightPosition: resolveProceduralLightPosition(),
       heroKeyLightSettings: resolveProceduralKeyLightSettings(),
@@ -1215,6 +1311,13 @@ export default function ScreenshotsDialog({
   }, [isOpen, resolvedDefaultTitleTranslationProvider]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    setIosDeviceFamily('iphone');
+    prevIosDeviceFamilyRef.current = 'iphone';
+    iosDeviceFamilyCacheRef.current = {};
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) {
       wasOpenRef.current = false;
       return;
@@ -1292,7 +1395,7 @@ export default function ScreenshotsDialog({
       play_store: resolveIosHeroPhonePose(initialPlayPreset?.heroPhonePose),
     };
     const nextHeroPhoneShape: Record<ScreenshotStore, IosHeroPhoneShape | null> = {
-      ios: resolveProceduralDeviceShapeForStore('ios', initialIosPreset?.heroPhoneShape),
+      ios: resolveProceduralDeviceShapeForStore('ios', initialIosPreset?.heroPhoneShape, iosDeviceFamily),
       play_store: resolveProceduralDeviceShapeForStore('play_store', initialPlayPreset?.heroPhoneShape),
     };
     const nextHeroPhoneLocation: Record<ScreenshotStore, ProceduralDeviceLocation | null> = {
@@ -1327,6 +1430,9 @@ export default function ScreenshotsDialog({
       play_store: resolveProceduralCameraSettings(initialPlayPreset?.heroCameraSettings),
     };
     setStore(defaultStore);
+    setIosDeviceFamily('iphone');
+    prevIosDeviceFamilyRef.current = 'iphone';
+    iosDeviceFamilyCacheRef.current = {};
     setSourceLocale(nextSourceLocale);
     setLocale(nextLocale);
     setSlot(1);
@@ -1471,10 +1577,22 @@ export default function ScreenshotsDialog({
     });
   }, [defaultLocale, isOpen, locale, titleTranslationsState]);
 
+  const activeScreenshotSlots = useMemo(
+    () => getActiveScreenshotTemplateSlots(store, iosDeviceFamily),
+    [iosDeviceFamily, store]
+  );
+  const activeSlotRangeLabel = useMemo(
+    () => formatSlotRangeLabel(activeScreenshotSlots),
+    [activeScreenshotSlots]
+  );
   const outputPath = useMemo(() => {
     const normalizedLocale = locale.trim() || 'en-US';
-    return `screenshots/${getScreenshotStorePathToken(store)}/${normalizedLocale}/${slot}.png`;
-  }, [locale, slot, store]);
+    const storePath =
+      store === 'ios'
+        ? `${getScreenshotStorePathToken(store)}/${resolveIosScreenshotDeviceFamily(iosDeviceFamily)}`
+        : getScreenshotStorePathToken(store);
+    return `screenshots/${storePath}/${normalizedLocale}/${slot}.png`;
+  }, [iosDeviceFamily, locale, slot, store]);
   const zipLocaleKeys = useMemo(
     () => Object.keys(zipManifestByStore[store]).sort((a, b) => a.localeCompare(b)),
     [store, zipManifestByStore]
@@ -1483,10 +1601,10 @@ export default function ScreenshotsDialog({
     () =>
       zipLocaleKeys.map((localeKey) => {
         const entries = zipManifestByStore[store][localeKey] ?? {};
-        const availableSlots = SCREENSHOT_TEMPLATE_SLOTS.filter((targetSlot) =>
+        const availableSlots = activeScreenshotSlots.filter((targetSlot) =>
           Boolean(getZipEntryForSlot(entries, targetSlot))
         );
-        const missingSlots = SCREENSHOT_TEMPLATE_SLOTS.filter(
+        const missingSlots = activeScreenshotSlots.filter(
           (targetSlot) => !getZipEntryForSlot(entries, targetSlot)
         );
         return {
@@ -1496,7 +1614,7 @@ export default function ScreenshotsDialog({
           isComplete: missingSlots.length === 0,
         };
       }),
-    [store, zipLocaleKeys, zipManifestByStore]
+    [activeScreenshotSlots, store, zipLocaleKeys, zipManifestByStore]
   );
   const zipCompleteLocaleCount = useMemo(
     () => zipLocaleSummary.filter((entry) => entry.isComplete).length,
@@ -1598,8 +1716,8 @@ export default function ScreenshotsDialog({
     [heroPhonePoseByStore, store]
   );
   const resolvedHeroPhoneShape = useMemo(
-    () => resolveProceduralDeviceShapeForStore(store, heroPhoneShapeByStore[store]),
-    [heroPhoneShapeByStore, store]
+    () => resolveProceduralDeviceShapeForStore(store, heroPhoneShapeByStore[store], iosDeviceFamily),
+    [heroPhoneShapeByStore, iosDeviceFamily, store]
   );
   const resolvedHeroPhoneLocation = useMemo(
     () => resolveIosHeroPhoneLocation(heroPhoneLocationByStore[store]),
@@ -1671,7 +1789,8 @@ export default function ScreenshotsDialog({
     const heroPhonePose = resolveIosHeroPhonePose(heroPhonePoseByStore[targetStore]);
     const resolvedHeroPhoneShapeForStore = resolveProceduralDeviceShapeForStore(
       targetStore,
-      heroPhoneShapeByStore[targetStore]
+      heroPhoneShapeByStore[targetStore],
+      targetStore === 'ios' ? iosDeviceFamily : undefined
     );
     const heroPhoneLocation = resolveIosHeroPhoneLocation(heroPhoneLocationByStore[targetStore]);
     const heroKeyLightPosition = resolveProceduralLightPosition(heroKeyLightPositionByStore[targetStore]);
@@ -1709,9 +1828,13 @@ export default function ScreenshotsDialog({
       key: JSON.stringify(preset),
     };
   }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, resolveTitleTemplateContext, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTopPaddingByStore, titleTypographyByStore]);
-  const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
+  const previewCanvasSize = useMemo(
+    () => getScreenshotTemplateCanvasSize(store, iosDeviceFamily),
+    [iosDeviceFamily, store]
+  );
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
+  const isIosStore = store === 'ios';
   const isHeroSlot = slot <= 2;
   const selectedSlotFile = filesByStore[store]?.[slot] ?? null;
   const selectedZipEntry = getZipEntryForSlot(activeZipLocaleEntries, slot);
@@ -1720,26 +1843,26 @@ export default function ScreenshotsDialog({
     filePreviewErrorsByStore[store]?.[slot] ||
     '';
   const hasAnySlotScreenshot = useMemo(
-    () => SCREENSHOT_TEMPLATE_SLOTS.some((targetSlot) => Boolean(filesByStore[store]?.[targetSlot])),
-    [filesByStore, store]
+    () => activeScreenshotSlots.some((targetSlot) => Boolean(filesByStore[store]?.[targetSlot])),
+    [activeScreenshotSlots, filesByStore, store]
   );
   const hasAnyZipScreenshot = useMemo(
     () =>
       Object.values(zipManifestByStore[store]).some((localeEntries) =>
-        SCREENSHOT_TEMPLATE_SLOTS.some((targetSlot) => Boolean(localeEntries[targetSlot]))
+        activeScreenshotSlots.some((targetSlot) => Boolean(localeEntries[targetSlot]))
       ),
-    [store, zipManifestByStore]
+    [activeScreenshotSlots, store, zipManifestByStore]
   );
   const canStart = !isLocked && (hasAnySlotScreenshot || hasAnyZipScreenshot);
   const canSaveSettings = Boolean(appId) && !isLocked && !isPersistingPreset;
   const titleTranslationSourceSlots = useMemo(() => {
     if (!sourceZipLocaleEntries) {
-      return [...SCREENSHOT_TEMPLATE_SLOTS];
+      return [...activeScreenshotSlots];
     }
-    return SCREENSHOT_TEMPLATE_SLOTS.filter((targetSlot) =>
+    return activeScreenshotSlots.filter((targetSlot) =>
       Boolean(getZipEntryForSlot(sourceZipLocaleEntries, targetSlot))
     );
-  }, [sourceZipLocaleEntries]);
+  }, [activeScreenshotSlots, sourceZipLocaleEntries]);
   const titleTranslationTargetLocales = useMemo(
     () =>
       zipLocaleKeys.filter(
@@ -2295,7 +2418,7 @@ export default function ScreenshotsDialog({
     setTitleTopPaddingByStore((prev) => ({
       ios: {
         ...prev.ios,
-        [slot]: 0,
+        [slot]: getDefaultTitleTopPadding(iosDeviceFamily),
       },
       play_store: {
         ...prev.play_store,
@@ -2343,7 +2466,7 @@ export default function ScreenshotsDialog({
     }));
     setHeroPhoneShapeByStore((prev) => ({
       ...prev,
-      [store]: resolveProceduralDeviceShapeForStore(store, getDefaultProceduralDeviceShape(store)),
+      [store]: resolveProceduralDeviceShapeForStore(store, getDefaultProceduralDeviceShape(store, iosDeviceFamily), iosDeviceFamily),
     }));
     setHeroPhoneLocationByStore((prev) => ({
       ...prev,
@@ -2375,9 +2498,9 @@ export default function ScreenshotsDialog({
     }));
     setHeroCameraSettingsByStore((prev) => ({
       ...prev,
-      [store]: resolveProceduralCameraSettings(DEFAULT_PROCEDURAL_CAMERA_SETTINGS),
+      [store]: resolveProceduralCameraSettings(getDefaultProceduralCameraSettings(iosDeviceFamily)),
     }));
-  }, [activeLocaleKey, slot, store]);
+  }, [activeLocaleKey, iosDeviceFamily, slot, store]);
 
   const handleGenerateCurrentTitleTranslations = useCallback(async () => {
     if (!onGenerateTitleTranslations) return;
@@ -2429,12 +2552,12 @@ export default function ScreenshotsDialog({
       setHeroPhoneShapeByStore((prev) => ({
         ...prev,
         [store]: resolveProceduralDeviceShapeForStore(store, {
-          ...(prev[store] ?? getDefaultProceduralDeviceShape(store)),
+          ...(prev[store] ?? getDefaultProceduralDeviceShape(store, iosDeviceFamily)),
           [key]: value,
-        }),
+        }, iosDeviceFamily),
       }));
     },
-    [store]
+    [iosDeviceFamily, store]
   );
 
   const handleHeroPhoneLocationChange = useCallback(
@@ -2600,6 +2723,7 @@ export default function ScreenshotsDialog({
 
     await drawStoreScreenshotToContext(ctx, browserImageLoader, {
       store,
+      iosDeviceFamily,
       slot: targetSlot,
       title: slotTitle,
       titleTemplateContext,
@@ -2615,7 +2739,7 @@ export default function ScreenshotsDialog({
       screenshotSource: screenshotDataUrl || undefined,
     });
     return canvas;
-  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolveTitleTemplateContext, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTopPaddingByStore, titleTranslationsState, titleTypographyByStore]);
+  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, browserImageLoader, iosDeviceFamily, previewCanvasSize.height, previewCanvasSize.width, resolveTitleTemplateContext, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTopPaddingByStore, titleTranslationsState, titleTypographyByStore]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setPanelState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -2692,6 +2816,11 @@ export default function ScreenshotsDialog({
   }, [isOpen, loadZipLocaleScreenshotDataUrls, locale, slot, store, zipManifestByStore]);
 
   useEffect(() => {
+    if (activeScreenshotSlots.includes(slot)) return;
+    setSlot(activeScreenshotSlots[0] ?? 1);
+  }, [activeScreenshotSlots, slot]);
+
+  useEffect(() => {
     if (!isOpen) return;
     setTitleExtraLineColorsByStore((prev) => {
       const currentSlotColors = prev[store]?.[slot] ?? [];
@@ -2763,18 +2892,38 @@ export default function ScreenshotsDialog({
           </div>
         </div>
 
-        <div className="screenshot-store-toggle">
-          {SCREENSHOT_STORES.map((item) => (
-            <Button
-              key={item.id}
-              type="button"
-              variant={item.id === store ? 'primary' : 'ghost'}
-              disabled={isLocked}
-              onClick={() => setStore(item.id)}
-            >
-              {item.label}
-            </Button>
-          ))}
+        <div className="screenshot-toolbar">
+          <div className="screenshot-toggle-group">
+            {SCREENSHOT_STORES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`screenshot-toggle-btn${item.id === store ? ' active' : ''}`}
+                disabled={isLocked}
+                onClick={() => setStore(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {isIosStore ? (
+            <>
+              <span className="screenshot-toolbar-sep" />
+              <div className="screenshot-toggle-group secondary">
+                {IOS_SCREENSHOT_DEVICE_FAMILIES.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`screenshot-toggle-btn${item.id === iosDeviceFamily ? ' active' : ''}`}
+                    disabled={isLocked}
+                    onClick={() => switchIosDeviceFamily(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
 
         <div
@@ -2786,7 +2935,10 @@ export default function ScreenshotsDialog({
             <div className="screenshots-preview-head">
               <div>
                 <strong>Canvas Şeridi</strong>
-                <span>Seçili slot: {slot} · sağa kaydır</span>
+                <span>
+                  {isIosStore ? `${getIosScreenshotDeviceFamilyLabel(iosDeviceFamily)} · ` : ''}
+                  Seçili slot: {slot} · sağa kaydır
+                </span>
               </div>
                 <span className="screenshots-preview-badge">
                 {previewCanvasSize.width}×{previewCanvasSize.height}
@@ -2794,10 +2946,11 @@ export default function ScreenshotsDialog({
             </div>
 
             <div className="screenshots-thumb-grid">
-              {SCREENSHOT_TEMPLATE_SLOTS.map((previewSlot) => (
+              {activeScreenshotSlots.map((previewSlot) => (
                 <PreviewCanvasCard
-                  key={`${store}-${previewSlot}`}
+                  key={`${store}-${iosDeviceFamily}-${previewSlot}`}
                   store={store}
+                  iosDeviceFamily={iosDeviceFamily}
                   slot={previewSlot}
                   title={activeLocaleTitleMap[previewSlot]}
                   titleTemplateContext={resolveTitleTemplateContext(store, activeLocaleKey)}
@@ -2890,7 +3043,7 @@ export default function ScreenshotsDialog({
                   onChange={(event) => setSlot(Number(event.target.value) as ScreenshotTemplateSlot)}
                   disabled={isLocked}
                 >
-                  {SCREENSHOT_TEMPLATE_SLOTS.map((item) => (
+                  {activeScreenshotSlots.map((item) => (
                     <option key={item} value={item}>
                       {item}
                     </option>
@@ -2937,7 +3090,7 @@ export default function ScreenshotsDialog({
                       <strong>{entry.locale}</strong>
                       <span>
                         {entry.isComplete
-                          ? '1-6 hazır'
+                          ? `${activeSlotRangeLabel} hazır`
                           : `Eksik: ${entry.missingSlots.join(', ')}`}
                       </span>
                     </div>
@@ -3666,7 +3819,7 @@ export default function ScreenshotsDialog({
                     zipLocaleKeys.length > 0 ? zipLocaleKeys : [locale.trim() || 'en-US'];
                   const firstAvailableFile =
                     filesByStore[store][slot] ??
-                    SCREENSHOT_TEMPLATE_SLOTS.map((targetSlot) => filesByStore[store][targetSlot]).find(
+                    activeScreenshotSlots.map((targetSlot) => filesByStore[store][targetSlot]).find(
                       (candidate): candidate is File => Boolean(candidate)
                     ) ??
                     null;
@@ -3684,7 +3837,7 @@ export default function ScreenshotsDialog({
                         : {};
                     const renderedSlots: ScreenshotRenderedSlotPayload[] = [];
 
-                    for (const targetSlot of SCREENSHOT_TEMPLATE_SLOTS) {
+                    for (const targetSlot of activeScreenshotSlots) {
                       const slotFile = filesByStore[store][targetSlot];
                       const slotZipEntry = getZipEntryForSlot(
                         zipManifestByStore[store]?.[targetLocale],
@@ -3755,6 +3908,7 @@ export default function ScreenshotsDialog({
                       onStart({
                         locale: targetLocale,
                         store,
+                        iosDeviceFamily: store === 'ios' ? iosDeviceFamily : undefined,
                         slot,
                         title: (localeSlotTitles[slot] ?? '').trim(),
                         file: selectedSlotFile ?? firstAvailableFile,

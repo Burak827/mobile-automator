@@ -898,6 +898,7 @@ export function serializeScreenshotTitleTranslationRecord(record: {
 export function serializeScreenshotUploadBatchRecord(record: {
   appId: number;
   store: ScreenshotStore;
+  iosDeviceFamily?: import("./screenshotTemplates/screenshotStores.js").IosScreenshotDeviceFamily;
   status: "pending" | "uploading" | "failed";
   localesJson: string;
   createdAt: string;
@@ -915,6 +916,7 @@ export function serializeScreenshotUploadBatchRecord(record: {
   return {
     appId: record.appId,
     store: record.store,
+    iosDeviceFamily: record.iosDeviceFamily,
     status: record.status,
     locales,
     createdAt: record.createdAt,

@@ -1,4 +1,4 @@
-import type { ScreenshotStore } from './screenshotStores.js';
+import type { IosScreenshotDeviceFamily, ScreenshotStore } from './screenshotStores.js';
 
 export type ProceduralDeviceRotation = {
   rotateX: number;
@@ -67,6 +67,13 @@ export const DEFAULT_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
   islandRadiusMm: 2.9,
 };
 
+export const DEFAULT_IPAD_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
+  ...DEFAULT_PROCEDURAL_DEVICE_SHAPE,
+  widthMm: 177.5,
+  lengthMm: 249.7,
+  thicknessMm: 6.1,
+};
+
 export const DEFAULT_PLAY_STORE_PROCEDURAL_DEVICE_SHAPE: ProceduralDeviceShape = {
   ...DEFAULT_PROCEDURAL_DEVICE_SHAPE,
   widthMm: 72,
@@ -79,6 +86,27 @@ export const DEFAULT_PROCEDURAL_CAMERA_SETTINGS: ProceduralCameraSettings = {
   perspectiveFov: 34,
   orthographicFrustumHeight: 120,
 };
+
+export const DEFAULT_IPAD_PROCEDURAL_CAMERA_SETTINGS: ProceduralCameraSettings = {
+  ...DEFAULT_PROCEDURAL_CAMERA_SETTINGS,
+  orthographicFrustumHeight: 211,
+};
+
+export const DEFAULT_IPAD_TITLE_TOP_PADDING = 100;
+
+export function getDefaultProceduralCameraSettings(
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): ProceduralCameraSettings {
+  return iosDeviceFamily === 'ipad'
+    ? { ...DEFAULT_IPAD_PROCEDURAL_CAMERA_SETTINGS }
+    : { ...DEFAULT_PROCEDURAL_CAMERA_SETTINGS };
+}
+
+export function getDefaultTitleTopPadding(
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): number {
+  return iosDeviceFamily === 'ipad' ? DEFAULT_IPAD_TITLE_TOP_PADDING : 0;
+}
 
 export function getDefaultCameraModeForSlot(slot: number): ProceduralCameraMode {
   void slot;
@@ -126,11 +154,12 @@ export const DEFAULT_IOS_HERO_PHONE_LOCATION: ProceduralDeviceLocation = {
 export const DEFAULT_IOS_HERO_PHONE_SHAPE = DEFAULT_PROCEDURAL_DEVICE_SHAPE;
 
 export function getDefaultProceduralDeviceShape(
-  store: ScreenshotStore = 'ios'
+  store: ScreenshotStore = 'ios',
+  iosDeviceFamily?: IosScreenshotDeviceFamily
 ): ProceduralDeviceShape {
-  return store === 'play_store'
-    ? { ...DEFAULT_PLAY_STORE_PROCEDURAL_DEVICE_SHAPE }
-    : { ...DEFAULT_PROCEDURAL_DEVICE_SHAPE };
+  if (store === 'play_store') return { ...DEFAULT_PLAY_STORE_PROCEDURAL_DEVICE_SHAPE };
+  if (iosDeviceFamily === 'ipad') return { ...DEFAULT_IPAD_PROCEDURAL_DEVICE_SHAPE };
+  return { ...DEFAULT_PROCEDURAL_DEVICE_SHAPE };
 }
 
 export function resolveProceduralDeviceRotation(
@@ -261,9 +290,10 @@ export function resolveProceduralDeviceShapeForStore(
       islandLength?: number | null;
       islandRadius?: number | null;
     }
-  ) | null
+  ) | null,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
 ): ProceduralDeviceShape {
-  const defaults = getDefaultProceduralDeviceShape(store);
+  const defaults = getDefaultProceduralDeviceShape(store, iosDeviceFamily);
   const hasNewMmShapeFields =
     value != null &&
     typeof value === 'object' &&

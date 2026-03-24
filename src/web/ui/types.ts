@@ -288,6 +288,7 @@ export type ScreenshotRendererPayload = {
 export type ScreenshotGenerateResponse = {
   appId: number;
   store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  iosDeviceFamily?: import('../screenshotTemplates/screenshotStores').IosScreenshotDeviceFamily;
   locale: string;
   slot: number;
   title: string;
@@ -359,6 +360,7 @@ export type ScreenshotTitleTranslationResponse = {
 export type ScreenshotUploadBatchPayload = {
   appId: number;
   store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  iosDeviceFamily?: import('../screenshotTemplates/screenshotStores').IosScreenshotDeviceFamily;
   status: "pending" | "uploading" | "failed";
   locales: string[];
   createdAt: string;
@@ -375,6 +377,7 @@ export type ScreenshotUploadBatchListResponse = {
 export type ScreenshotUploadBatchApplyResponse = {
   appId: number;
   store: import('../screenshotTemplates/screenshotStores').ScreenshotStore;
+  iosDeviceFamily?: import('../screenshotTemplates/screenshotStores').IosScreenshotDeviceFamily;
   uploadedLocales: string[];
   failedLocales: Array<{ locale: string; error: string }>;
   outputRoot: string;

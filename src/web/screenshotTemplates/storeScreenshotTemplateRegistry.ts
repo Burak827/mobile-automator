@@ -1,7 +1,13 @@
-import type { ScreenshotStore } from './screenshotStores.js';
+import {
+  resolveIosScreenshotDeviceFamily,
+  type IosScreenshotDeviceFamily,
+  type ScreenshotStore,
+} from './screenshotStores.js';
 
 export const VARIANT3_IOS_CANVAS_WIDTH = 1284;
 export const VARIANT3_IOS_CANVAS_HEIGHT = 2778;
+export const VARIANT3_IOS_IPAD_CANVAS_WIDTH = 2064;
+export const VARIANT3_IOS_IPAD_CANVAS_HEIGHT = 2752;
 export const VARIANT3_PLAY_STORE_CANVAS_WIDTH = 1080;
 export const VARIANT3_PLAY_STORE_CANVAS_HEIGHT = 1920;
 
@@ -49,13 +55,29 @@ const DEFAULT_IOS_PALETTE: ScreenshotTemplatePalette = {
 
 const DEFAULT_PLAY_STORE_PALETTE: ScreenshotTemplatePalette = { ...DEFAULT_IOS_PALETTE };
 
-export function getScreenshotTemplateCanvasSize(store: ScreenshotStore): {
+export function getScreenshotTemplateCanvasSize(
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): {
   width: number;
   height: number;
 } {
+  if (store === 'ios' && resolveIosScreenshotDeviceFamily(iosDeviceFamily) === 'ipad') {
+    return { width: VARIANT3_IOS_IPAD_CANVAS_WIDTH, height: VARIANT3_IOS_IPAD_CANVAS_HEIGHT };
+  }
   return store === 'play_store'
     ? { width: VARIANT3_PLAY_STORE_CANVAS_WIDTH, height: VARIANT3_PLAY_STORE_CANVAS_HEIGHT }
     : { width: VARIANT3_IOS_CANVAS_WIDTH, height: VARIANT3_IOS_CANVAS_HEIGHT };
+}
+
+export function getActiveScreenshotTemplateSlots(
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
+): ScreenshotTemplateSlot[] {
+  if (store === 'ios' && resolveIosScreenshotDeviceFamily(iosDeviceFamily) === 'ipad') {
+    return [1, 2];
+  }
+  return [...SCREENSHOT_TEMPLATE_SLOTS];
 }
 
 export function getScreenshotTemplateId(store: ScreenshotStore): string {

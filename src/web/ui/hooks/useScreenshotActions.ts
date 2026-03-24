@@ -280,6 +280,7 @@ export function useScreenshotActions(params: {
 
   const handleGenerateScreenshot = useCallback(async ({
     store,
+    iosDeviceFamily,
     locale,
     slot,
     title,
@@ -323,7 +324,9 @@ export function useScreenshotActions(params: {
           titleTopPadding: slotTitleTopPaddings[slot] ?? 0,
           titleCenter: slotTitleCenters[slot] ?? false,
         }];
-    pushStatus(`📸 ${slotsToGenerate.length} screenshot üretimi başlatıldı (${store}/${locale})`);
+    pushStatus(
+      `📸 ${slotsToGenerate.length} screenshot üretimi başlatıldı (${store}${iosDeviceFamily ? `/${iosDeviceFamily}` : ''}/${locale})`
+    );
 
     try {
       let successCount = 0;
@@ -339,6 +342,7 @@ export function useScreenshotActions(params: {
           }
 
           const payload = await generateScreenshot(selectedAppId, store, {
+            iosDeviceFamily,
             locale,
             slot: renderedSlot.slot,
             title: renderedSlot.title,
