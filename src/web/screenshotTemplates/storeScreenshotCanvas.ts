@@ -89,6 +89,12 @@ function scaledLineGap(store: ScreenshotStore, gap: unknown): number {
   return Math.round(numeric * getStoreFontScale(store));
 }
 
+function scaledTopPadding(store: ScreenshotStore, padding: unknown): number {
+  const numeric = Number(padding);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * getStoreFontScale(store));
+}
+
 export type StoreScreenshotCanvasInput = {
   store: ScreenshotStore;
   slot: ScreenshotTemplateSlot;
@@ -97,6 +103,7 @@ export type StoreScreenshotCanvasInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  titleTopPadding?: number | null;
   titleCenter?: boolean | null;
   backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette?: Partial<ScreenshotTemplatePalette> | null;
@@ -148,6 +155,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleTopPadding: input.titleTopPadding,
       titleCenter: input.titleCenter,
       backgroundSettings,
       palette,
@@ -166,6 +174,7 @@ export async function drawStoreScreenshotToContext(
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleTopPadding: input.titleTopPadding,
       titleCenter: input.titleCenter,
       backgroundSettings,
       palette,
@@ -192,6 +201,7 @@ function drawIosFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -220,6 +230,7 @@ function drawIosSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -238,6 +249,7 @@ function drawIosSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    titleTopPadding: input.titleTopPadding,
     titleCenter: input.titleCenter,
     backgroundSettings: input.backgroundSettings,
     palette: input.palette,
@@ -281,6 +293,7 @@ export function drawIosSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -307,7 +320,7 @@ export function drawIosSplitHeroBackdrop(
   const iosFontSize = scaledFontSize('ios', input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
-    y: IOS_TITLE_BLOCK_Y,
+    y: IOS_TITLE_BLOCK_Y + scaledTopPadding('ios', input.titleTopPadding),
     maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
@@ -366,6 +379,7 @@ function drawIosPoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -404,6 +418,7 @@ export function drawIosPosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -424,7 +439,7 @@ export function drawIosPosterBackdrop(
   const iosFontSize2 = scaledFontSize('ios', input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: IOS_TITLE_BLOCK_X,
-    y: IOS_TITLE_BLOCK_Y,
+    y: IOS_TITLE_BLOCK_Y + scaledTopPadding('ios', input.titleTopPadding),
     maxWidth: width - IOS_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
@@ -446,6 +461,7 @@ function drawPlayStoreFrame(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -472,6 +488,7 @@ function drawPlayStoreSplitHero(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -488,6 +505,7 @@ function drawPlayStoreSplitHero(
     titleTypography: input.titleTypography,
     titleLineColors: input.titleLineColors,
     titleLineGap: input.titleLineGap,
+    titleTopPadding: input.titleTopPadding,
     titleCenter: input.titleCenter,
     backgroundSettings: input.backgroundSettings,
     palette: input.palette,
@@ -531,6 +549,7 @@ export function drawPlayStoreSplitHeroBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -557,7 +576,7 @@ export function drawPlayStoreSplitHeroBackdrop(
   const playFontSize = scaledFontSize('play_store', input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
-    y: PLAY_STORE_TITLE_BLOCK_Y,
+    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding('play_store', input.titleTopPadding),
     maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,
@@ -590,6 +609,7 @@ function drawPlayStorePoster(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -628,6 +648,7 @@ export function drawPlayStorePosterBackdrop(
     titleTypography: ScreenshotTitleTypography;
     titleLineColors: string[];
     titleLineGap?: number | null;
+    titleTopPadding?: number | null;
     titleCenter?: boolean | null;
     backgroundSettings: ScreenshotBackgroundSettings;
     palette: ScreenshotTemplatePalette;
@@ -648,7 +669,7 @@ export function drawPlayStorePosterBackdrop(
   const playFontSize2 = scaledFontSize('play_store', input.titleTypography.fontSize);
   drawTitleBlock(ctx, {
     x: PLAY_STORE_TITLE_BLOCK_X,
-    y: PLAY_STORE_TITLE_BLOCK_Y,
+    y: PLAY_STORE_TITLE_BLOCK_Y + scaledTopPadding('play_store', input.titleTopPadding),
     maxWidth: width - PLAY_STORE_TITLE_BLOCK_X * 2,
     lines: input.titleLines,
     fontFamily: input.titleTypography.fontFamily,

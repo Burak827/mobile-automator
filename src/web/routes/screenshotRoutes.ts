@@ -36,6 +36,7 @@ import {
   parseScreenshotSlot1SbeSettingsInput,
   parseScreenshotSlotTitleExtraLineColorsInput,
   parseScreenshotSlotTitleLineGapsInput,
+  parseScreenshotSlotTitleTopPaddingsInput,
   parseScreenshotSlotTitleCentersInput,
   parseScreenshotSlotTitleTypographyInput,
   parseScreenshotSlotTitlesInput,
@@ -217,6 +218,10 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         body.slotTitleLineGaps,
         body.titleLineGap
       );
+      const slotTitleTopPaddings = parseScreenshotSlotTitleTopPaddingsInput(
+        body.slotTitleTopPaddings,
+        body.titleTopPadding
+      );
       const slotTitleCenters = parseScreenshotSlotTitleCentersInput(body.slotTitleCenters);
       const slotTitleTypography = parseScreenshotSlotTitleTypographyInput(store, body.slotTitleTypography);
       const slotBackgroundSettings = parseScreenshotSlotBackgroundSettingsInput(
@@ -247,6 +252,7 @@ export const registerScreenshotRoutes: RouteRegistrar = (router, ctx) => {
         slotTitles,
         slotTitleExtraLineColors,
         slotTitleLineGaps,
+        slotTitleTopPaddings,
         slotTitleCenters,
         slotTitleTypography,
         slotBackgroundSettings,
@@ -792,6 +798,10 @@ async function handleScreenshotGenerateRequest(
     body.slotTitleLineGaps,
     body.titleLineGap
   );
+  const slotTitleTopPaddings = parseScreenshotSlotTitleTopPaddingsInput(
+    body.slotTitleTopPaddings,
+    body.titleTopPadding
+  );
   const slotTitleCenters = parseScreenshotSlotTitleCentersInput(body.slotTitleCenters);
   const slotTitleTypography = parseScreenshotSlotTitleTypographyInput(store, body.slotTitleTypography);
   const slotBackgroundSettings = parseScreenshotSlotBackgroundSettingsInput(
@@ -869,6 +879,7 @@ async function handleScreenshotGenerateRequest(
     slotTitles,
     slotTitleExtraLineColors,
     slotTitleLineGaps,
+    slotTitleTopPaddings,
     slotTitleCenters,
     slotTitleTypography,
     slotBackgroundSettings,

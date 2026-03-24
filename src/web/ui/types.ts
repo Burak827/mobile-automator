@@ -198,6 +198,7 @@ export type ScreenshotSlotPaletteMapPayload = Partial<Record<number, ScreenshotP
 export type ScreenshotSlotTitleMapPayload = Partial<Record<number, string>>;
 export type ScreenshotSlotTitleExtraLineColorsMapPayload = Partial<Record<number, string[]>>;
 export type ScreenshotSlotTitleLineGapMapPayload = Partial<Record<number, number>>;
+export type ScreenshotSlotTitleTopPaddingMapPayload = Partial<Record<number, number>>;
 export type ScreenshotSlotTitleCenterMapPayload = Partial<Record<number, boolean>>;
 export type ScreenshotTitleTypographyPayload = {
   fontFamily: string;
@@ -314,6 +315,7 @@ export type ScreenshotPresetPayload = {
   slotTitles?: ScreenshotSlotTitleMapPayload;
   slotTitleExtraLineColors?: ScreenshotSlotTitleExtraLineColorsMapPayload;
   slotTitleLineGaps?: ScreenshotSlotTitleLineGapMapPayload;
+  slotTitleTopPaddings?: ScreenshotSlotTitleTopPaddingMapPayload;
   slotTitleCenters?: ScreenshotSlotTitleCenterMapPayload;
   slotTitleTypography?: ScreenshotSlotTitleTypographyMapPayload;
   heroPhonePose: ScreenshotHeroPhonePosePayload | null;

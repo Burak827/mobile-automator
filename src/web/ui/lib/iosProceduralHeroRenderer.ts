@@ -72,6 +72,7 @@ type RenderInput = {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  titleTopPadding?: number | null;
   titleCenter?: boolean | null;
   backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette: ScreenshotTemplatePalette;
@@ -168,6 +169,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleTopPadding: input.titleTopPadding,
       titleCenter: input.titleCenter,
       backgroundSettings,
       palette: input.palette,
@@ -183,6 +185,7 @@ export async function renderIosProceduralHeroComposite(input: RenderInput): Prom
       titleTypography,
       titleLineColors,
       titleLineGap: input.titleLineGap,
+      titleTopPadding: input.titleTopPadding,
       titleCenter: input.titleCenter,
       backgroundSettings,
       palette: input.palette,
@@ -260,6 +263,7 @@ export async function renderIosProceduralPosterComposite(input: {
   titleTypography?: Partial<ScreenshotTitleTypography> | null;
   titleExtraLineColors?: string[];
   titleLineGap?: number | null;
+  titleTopPadding?: number | null;
   backgroundSettings?: Partial<ScreenshotBackgroundSettings> | null;
   palette: ScreenshotTemplatePalette;
   screenshotUrl: string;
@@ -297,6 +301,7 @@ export async function renderIosProceduralPosterComposite(input: {
     titleTypography: posterTitleTypography,
     titleLineColors: posterTitleLineColors,
     titleLineGap: input.titleLineGap,
+    titleTopPadding: input.titleTopPadding,
     backgroundSettings,
     palette: input.palette,
     width: input.width,

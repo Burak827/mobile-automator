@@ -653,6 +653,10 @@ export function parseScreenshotTitleLineGapInput(value: unknown): number {
   return toOptionalNumber(value) ?? 0;
 }
 
+export function parseScreenshotTitleTopPaddingInput(value: unknown): number {
+  return toOptionalNumber(value) ?? 0;
+}
+
 export function parseScreenshotSlotTitleLineGapsInput(
   value: unknown,
   legacyValue?: unknown
@@ -668,6 +672,27 @@ export function parseScreenshotSlotTitleLineGapsInput(
   if (!value || typeof value !== "object") {
     for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
       next[slot] = legacyGap;
+    }
+  }
+
+  return next;
+}
+
+export function parseScreenshotSlotTitleTopPaddingsInput(
+  value: unknown,
+  legacyValue?: unknown
+): Record<ScreenshotTemplateSlot, number> {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const legacyPadding = parseScreenshotTitleTopPaddingInput(legacyValue);
+  const next = {} as Record<ScreenshotTemplateSlot, number>;
+
+  for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
+    next[slot] = parseScreenshotTitleTopPaddingInput(raw[String(slot)]);
+  }
+
+  if (!value || typeof value !== "object") {
+    for (const slot of SCREENSHOT_TEMPLATE_SLOTS) {
+      next[slot] = legacyPadding;
     }
   }
 
@@ -710,6 +735,7 @@ export function parseStoredScreenshotPresetConfig(
   slotTitles: Record<ScreenshotTemplateSlot, string>;
   slotTitleExtraLineColors: Record<ScreenshotTemplateSlot, string[]>;
   slotTitleLineGaps: Record<ScreenshotTemplateSlot, number>;
+  slotTitleTopPaddings: Record<ScreenshotTemplateSlot, number>;
   slotTitleCenters: Record<ScreenshotTemplateSlot, boolean>;
   slotTitleTypography: Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>;
   slotBackgroundSettings: Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>;
@@ -730,6 +756,7 @@ export function parseStoredScreenshotPresetConfig(
       slotTitles: parseStoredScreenshotSlotTitles(undefined),
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
+      slotTitleTopPaddings: parseScreenshotSlotTitleTopPaddingsInput(undefined, undefined),
       slotTitleCenters: parseScreenshotSlotTitleCentersInput(undefined),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
       slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
@@ -751,8 +778,10 @@ export function parseStoredScreenshotPresetConfig(
     "slotTitles" in raw ||
     "slotTitleExtraLineColors" in raw ||
     "slotTitleLineGaps" in raw ||
+    "slotTitleTopPaddings" in raw ||
     "slotTitleCenters" in raw ||
     "titleLineGap" in raw ||
+    "titleTopPadding" in raw ||
     "slotTitleTypography" in raw ||
     "slotBackgroundSettings" in raw ||
     "heroPhonePose" in raw ||
@@ -772,6 +801,10 @@ export function parseStoredScreenshotPresetConfig(
       slotTitles: parseStoredScreenshotSlotTitles(raw.slotTitles),
       slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(raw.slotTitleExtraLineColors),
       slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(raw.slotTitleLineGaps, raw.titleLineGap),
+      slotTitleTopPaddings: parseScreenshotSlotTitleTopPaddingsInput(
+        raw.slotTitleTopPaddings,
+        raw.titleTopPadding
+      ),
       slotTitleCenters: parseScreenshotSlotTitleCentersInput(raw.slotTitleCenters),
       slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, raw.slotTitleTypography),
       slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(raw.slotBackgroundSettings),
@@ -797,6 +830,7 @@ export function parseStoredScreenshotPresetConfig(
     slotTitles: parseStoredScreenshotSlotTitles(undefined),
     slotTitleExtraLineColors: resolveStoredScreenshotTitleExtraLineColorsMap(undefined),
     slotTitleLineGaps: parseScreenshotSlotTitleLineGapsInput(undefined, undefined),
+    slotTitleTopPaddings: parseScreenshotSlotTitleTopPaddingsInput(undefined, undefined),
     slotTitleCenters: parseScreenshotSlotTitleCentersInput(undefined),
     slotTitleTypography: parseStoredScreenshotSlotTitleTypography(store, undefined),
     slotBackgroundSettings: parseScreenshotSlotBackgroundSettingsInput(undefined),
@@ -833,6 +867,7 @@ export function serializeScreenshotPresetRecord(record: {
     slotTitles: config.slotTitles,
     slotTitleExtraLineColors: config.slotTitleExtraLineColors,
     slotTitleLineGaps: config.slotTitleLineGaps,
+    slotTitleTopPaddings: config.slotTitleTopPaddings,
     slotTitleCenters: config.slotTitleCenters,
     slotTitleTypography: config.slotTitleTypography,
     slotBackgroundSettings: config.slotBackgroundSettings,

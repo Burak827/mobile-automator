@@ -52,6 +52,7 @@ export async function saveScreenshotPreset(
       slotTitles: preset.slotTitles,
       slotTitleExtraLineColors: preset.slotTitleExtraLineColors,
       slotTitleLineGaps: preset.slotTitleLineGaps,
+      slotTitleTopPaddings: preset.slotTitleTopPaddings,
       slotTitleCenters: preset.slotTitleCenters,
       slotTitleTypography: preset.slotTitleTypography,
       slotBackgroundSettings: preset.slotBackgroundSettings,

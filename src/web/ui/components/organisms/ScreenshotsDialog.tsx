@@ -106,6 +106,7 @@ export type ScreenshotRenderedSlotPayload = {
   titleTypography: ScreenshotTitleTypography;
   titleExtraLineColors: string[];
   titleLineGap: number;
+  titleTopPadding: number;
   titleCenter?: boolean;
 };
 
@@ -140,6 +141,7 @@ export type ScreenshotDialogStartPayload = {
   slotTitles: Partial<Record<ScreenshotTemplateSlot, string>>;
   slotTitleExtraLineColors: Partial<Record<ScreenshotTemplateSlot, string[]>>;
   slotTitleLineGaps: Partial<Record<ScreenshotTemplateSlot, number>>;
+  slotTitleTopPaddings: Partial<Record<ScreenshotTemplateSlot, number>>;
   slotTitleCenters: Partial<Record<ScreenshotTemplateSlot, boolean>>;
   titleTypography: ScreenshotTitleTypography;
   slotTitleTypography: Partial<Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>>;
@@ -163,6 +165,7 @@ export type ScreenshotPresetConfig = {
   slotTitles?: Partial<Record<ScreenshotTemplateSlot, string>>;
   slotTitleExtraLineColors?: Partial<Record<ScreenshotTemplateSlot, string[]>>;
   slotTitleLineGaps?: Partial<Record<ScreenshotTemplateSlot, number>>;
+  slotTitleTopPaddings?: Partial<Record<ScreenshotTemplateSlot, number>>;
   slotTitleCenters?: Partial<Record<ScreenshotTemplateSlot, boolean>>;
   slotTitleTypography?: Partial<Record<ScreenshotTemplateSlot, ScreenshotTitleTypography>>;
   slotBackgroundSettings?: Partial<Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>>;
@@ -206,6 +209,7 @@ type PreviewCardProps = {
   titleTypography: ScreenshotTitleTypography;
   titleExtraLineColors: string[];
   titleLineGap: number;
+  titleTopPadding: number;
   titleCenter: boolean;
   backgroundSettings: ScreenshotBackgroundSettings;
   palette: ScreenshotTemplatePalette;
@@ -229,6 +233,7 @@ type PanelKey = 'rotation' | 'color' | 'background' | 'shape' | 'location' | 'li
 type ScreenshotSlotTitleMap = Record<ScreenshotTemplateSlot, string>;
 type ScreenshotSlotPaletteMap = Record<ScreenshotTemplateSlot, ScreenshotTemplatePalette>;
 type ScreenshotSlotTitleLineGapMap = Record<ScreenshotTemplateSlot, number>;
+type ScreenshotSlotTitleTopPaddingMap = Record<ScreenshotTemplateSlot, number>;
 type ScreenshotSlotTitleCenterStateMap = Record<ScreenshotTemplateSlot, boolean>;
 type ScreenshotSlotBackgroundSettingsStateMap = Record<ScreenshotTemplateSlot, ScreenshotBackgroundSettings>;
 type ScreenshotSlotFileMap = Record<ScreenshotTemplateSlot, File | null>;
@@ -448,6 +453,17 @@ function createEmptySlotTitleLineGapMap(): ScreenshotSlotTitleLineGapMap {
   };
 }
 
+function createEmptySlotTitleTopPaddingMap(): ScreenshotSlotTitleTopPaddingMap {
+  return {
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+    6: 0,
+  };
+}
+
 function createEmptySlotFileMap(): ScreenshotSlotFileMap {
   return {
     1: null,
@@ -506,6 +522,20 @@ function createSlotSbeMap(preset?: ScreenshotPresetConfig): ScreenshotSlotSbeMap
 function createSlotTitleLineGapMap(preset?: ScreenshotPresetConfig): ScreenshotSlotTitleLineGapMap {
   const next = createEmptySlotTitleLineGapMap();
   const raw = preset?.slotTitleLineGaps ?? {};
+
+  for (const entry of SCREENSHOT_TEMPLATE_SLOTS) {
+    const numeric = Number(raw[entry]);
+    next[entry] = Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  return next;
+}
+
+function createSlotTitleTopPaddingMap(
+  preset?: ScreenshotPresetConfig
+): ScreenshotSlotTitleTopPaddingMap {
+  const next = createEmptySlotTitleTopPaddingMap();
+  const raw = preset?.slotTitleTopPaddings ?? {};
 
   for (const entry of SCREENSHOT_TEMPLATE_SLOTS) {
     const numeric = Number(raw[entry]);
@@ -587,6 +617,7 @@ function mergeScreenshotPresetConfig(
     slotTitles: draft.slotTitles ?? base.slotTitles,
     slotTitleExtraLineColors: draft.slotTitleExtraLineColors ?? base.slotTitleExtraLineColors,
     slotTitleLineGaps: draft.slotTitleLineGaps ?? base.slotTitleLineGaps,
+    slotTitleTopPaddings: draft.slotTitleTopPaddings ?? base.slotTitleTopPaddings,
     slotTitleCenters: draft.slotTitleCenters ?? base.slotTitleCenters,
     slotTitleTypography: draft.slotTitleTypography ?? base.slotTitleTypography,
     slotBackgroundSettings: draft.slotBackgroundSettings ?? base.slotBackgroundSettings,
@@ -778,6 +809,7 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
   titleTypography,
   titleExtraLineColors,
   titleLineGap,
+  titleTopPadding,
   backgroundSettings,
   palette,
   heroPhonePose,
@@ -812,63 +844,73 @@ const PreviewCanvasCard = memo(function PreviewCanvasCard({
     if (!ctx) return;
 
     const renderId = ++renderIdRef.current;
+    void (async () => {
+      try {
+        await ensureGoogleFontsLoaded([
+          {
+            family: titleTypography.fontFamily,
+            weights: [titleTypography.fontWeight],
+          },
+        ]);
+        if (renderIdRef.current !== renderId) return;
 
-    if (slot <= 2) {
-      void renderIosProceduralHeroComposite({
-        store,
-        slot: slot as 1 | 2,
-        title,
-        titleTemplateContext,
-        titleTypography,
-        titleExtraLineColors,
-        titleLineGap,
-        titleCenter,
-        backgroundSettings,
-        palette,
-        screenshotUrl,
-        imageLoader,
-        heroPhonePose,
-        heroPhoneShape,
-        heroPhoneLocation,
-        heroKeyLightPosition,
-        heroKeyLightSettings,
-        slot1SbeSettings,
-        heroCameraMode,
-        heroCameraSettings,
-        width: previewWidth,
-        height: previewHeight,
-        previewRuntimeKey: canvas,
-      }).then((resultCanvas) => {
-        if (renderIdRef.current !== renderId) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(resultCanvas, 0, 0, canvas.width, canvas.height);
-      }).catch((error) => {
+        if (slot <= 2) {
+          const resultCanvas = await renderIosProceduralHeroComposite({
+            store,
+            slot: slot as 1 | 2,
+            title,
+            titleTemplateContext,
+            titleTypography,
+            titleExtraLineColors,
+            titleLineGap,
+            titleTopPadding,
+            titleCenter,
+            backgroundSettings,
+            palette,
+            screenshotUrl,
+            imageLoader,
+            heroPhonePose,
+            heroPhoneShape,
+            heroPhoneLocation,
+            heroKeyLightPosition,
+            heroKeyLightSettings,
+            slot1SbeSettings,
+            heroCameraMode,
+            heroCameraSettings,
+            width: previewWidth,
+            height: previewHeight,
+            previewRuntimeKey: canvas,
+          });
+          if (renderIdRef.current !== renderId) return;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(resultCanvas, 0, 0, canvas.width, canvas.height);
+          return;
+        }
+
+        await drawStoreScreenshotToContext(ctx, imageLoader, {
+          store,
+          slot,
+          title,
+          titleTemplateContext,
+          titleTypography,
+          titleExtraLineColors,
+          titleLineGap,
+          titleTopPadding,
+          titleCenter,
+          backgroundSettings,
+          palette,
+          heroPhonePose,
+          heroPhoneShape,
+          screenshotSource: screenshotUrl || undefined,
+        });
+      } catch (error) {
         if (renderIdRef.current !== renderId) return;
         drawCanvasError(canvas, error instanceof Error ? error.message : String(error));
-      });
-    } else {
-      void drawStoreScreenshotToContext(ctx, imageLoader, {
-        store,
-        slot,
-        title,
-        titleTemplateContext,
-        titleTypography,
-        titleExtraLineColors,
-        titleLineGap,
-        titleCenter,
-        backgroundSettings,
-        palette,
-        heroPhonePose,
-        heroPhoneShape,
-        screenshotSource: screenshotUrl || undefined,
-      }).catch((error) => {
-        if (renderIdRef.current !== renderId) return;
-        drawCanvasError(canvas, error instanceof Error ? error.message : String(error));
-      });
-    }
+      }
+    })();
 
     return () => { /* renderIdRef check guards stale renders */ };
-  }, [backgroundSettings, fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleCenter, titleExtraLineColors, titleLineGap, titleTemplateContext, titleTypography]);
+  }, [backgroundSettings, fontLoadVersion, heroCameraMode, heroCameraSettings, heroKeyLightPosition, heroKeyLightSettings, heroPhoneLocation, heroPhonePose, heroPhoneShape, imageLoader, palette, previewHeight, previewWidth, screenshotUrl, slot, slot1SbeSettings, store, title, titleCenter, titleExtraLineColors, titleLineGap, titleTemplateContext, titleTopPadding, titleTypography]);
 
   return (
     <button
@@ -929,6 +971,12 @@ export default function ScreenshotsDialog({
   >({
     ios: createEmptySlotTitleLineGapMap(),
     play_store: createEmptySlotTitleLineGapMap(),
+  });
+  const [titleTopPaddingByStore, setTitleTopPaddingByStore] = useState<
+    Record<ScreenshotStore, ScreenshotSlotTitleTopPaddingMap>
+  >({
+    ios: createEmptySlotTitleTopPaddingMap(),
+    play_store: createEmptySlotTitleTopPaddingMap(),
   });
   const [titleCenterByStore, setTitleCenterByStore] = useState<
     Record<ScreenshotStore, ScreenshotSlotTitleCenterStateMap>
@@ -1054,6 +1102,7 @@ export default function ScreenshotsDialog({
       slotTitles: createSlotTitleMap(),
       slotTitleExtraLineColors: createEmptyScreenshotTitleExtraLineColorsMap(),
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
+      slotTitleTopPaddings: createEmptySlotTitleTopPaddingMap(),
       slotTitleCenters: createDefaultScreenshotTitleCenterMap(),
       slotTitleTypography: createSlotTitleTypographyMap('ios'),
       slotBackgroundSettings: createDefaultScreenshotBackgroundSettingsMap(),
@@ -1072,6 +1121,7 @@ export default function ScreenshotsDialog({
       slotTitles: createSlotTitleMap(),
       slotTitleExtraLineColors: createEmptyScreenshotTitleExtraLineColorsMap(),
       slotTitleLineGaps: createEmptySlotTitleLineGapMap(),
+      slotTitleTopPaddings: createEmptySlotTitleTopPaddingMap(),
       slotTitleCenters: createDefaultScreenshotTitleCenterMap(),
       slotTitleTypography: createSlotTitleTypographyMap('play_store'),
       slotBackgroundSettings: createDefaultScreenshotBackgroundSettingsMap(),
@@ -1200,6 +1250,11 @@ export default function ScreenshotsDialog({
       ios: { ...sharedTitleLineGap },
       play_store: { ...sharedTitleLineGap },
     };
+    const sharedTitleTopPadding = createSlotTitleTopPaddingMap(sharedPresetSource);
+    const nextTitleTopPadding: Record<ScreenshotStore, ScreenshotSlotTitleTopPaddingMap> = {
+      ios: { ...sharedTitleTopPadding },
+      play_store: { ...sharedTitleTopPadding },
+    };
     const nextHeroPhonePose: Record<ScreenshotStore, IosHeroPhonePose | null> = {
       ios: resolveIosHeroPhonePose(initialIosPreset?.heroPhonePose),
       play_store: resolveIosHeroPhonePose(initialPlayPreset?.heroPhonePose),
@@ -1246,6 +1301,7 @@ export default function ScreenshotsDialog({
     setTitleTranslationsState(mergedTitleTranslations);
     setTitlesByStore(nextSlotTitles);
     setTitleLineGapByStore(nextTitleLineGap);
+    setTitleTopPaddingByStore(nextTitleTopPadding);
     setTitleCenterByStore(nextSlotTitleCenters);
     setTitleExtraLineColorsByStore(nextSlotTitleExtraLineColors);
     setTitleTypographyByStore(nextSlotTitleTypography);
@@ -1307,6 +1363,7 @@ export default function ScreenshotsDialog({
         slotTitles: nextSlotTitles.ios,
         slotTitleExtraLineColors: nextSlotTitleExtraLineColors.ios,
         slotTitleLineGaps: nextTitleLineGap.ios,
+        slotTitleTopPaddings: nextTitleTopPadding.ios,
         slotTitleCenters: nextSlotTitleCenters.ios,
         slotTitleTypography: nextSlotTitleTypography.ios,
         slotBackgroundSettings: nextSlotBackgroundSettings.ios,
@@ -1325,6 +1382,7 @@ export default function ScreenshotsDialog({
         slotTitles: nextSlotTitles.play_store,
         slotTitleExtraLineColors: nextSlotTitleExtraLineColors.play_store,
         slotTitleLineGaps: nextTitleLineGap.play_store,
+        slotTitleTopPaddings: nextTitleTopPadding.play_store,
         slotTitleCenters: nextSlotTitleCenters.play_store,
         slotTitleTypography: nextSlotTitleTypography.play_store,
         slotBackgroundSettings: nextSlotBackgroundSettings.play_store,
@@ -1497,6 +1555,7 @@ export default function ScreenshotsDialog({
     [resolvedPalette, resolvedTitleLines.length, slot, store, titleExtraLineColorsByStore]
   );
   const resolvedTitleLineGap = titleLineGapByStore[store]?.[slot] ?? 0;
+  const resolvedTitleTopPadding = titleTopPaddingByStore[store]?.[slot] ?? 0;
   const resolvedTitleCenter = parseScreenshotTitleCenterInput(titleCenterByStore[store]?.[slot], false);
   const resolvedBackgroundSettings = useMemo(
     () => resolveScreenshotBackgroundSettings(backgroundSettingsByStore[store]?.[slot]),
@@ -1573,6 +1632,7 @@ export default function ScreenshotsDialog({
       return acc;
     }, {} as ScreenshotSlotTitleExtraLineColorsMap);
     const slotTitleLineGaps = titleLineGapByStore[targetStore];
+    const slotTitleTopPaddings = titleTopPaddingByStore[targetStore];
     const slotTitleCenters = titleCenterByStore[targetStore];
     const slotTitleTypography = titleTypographyByStore[targetStore];
     const palette = resolveScreenshotTemplatePalette(targetStore, slotPalettes[1]);
@@ -1599,6 +1659,7 @@ export default function ScreenshotsDialog({
       slotTitles,
       slotTitleExtraLineColors,
       slotTitleLineGaps,
+      slotTitleTopPaddings,
       slotTitleCenters,
       slotTitleTypography,
       slotBackgroundSettings: backgroundSettingsByStore[targetStore],
@@ -1615,7 +1676,7 @@ export default function ScreenshotsDialog({
       preset,
       key: JSON.stringify(preset),
     };
-  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, resolveTitleTemplateContext, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTypographyByStore]);
+  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, heroCameraModeByStore, heroCameraSettingsByStore, heroKeyLightPositionByStore, heroKeyLightSettingsByStore, heroPhoneLocationByStore, heroPhonePoseByStore, heroPhoneShapeByStore, persistedTitleExtraLineColorsForStore, resolveTitleTemplateContext, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTopPaddingByStore, titleTypographyByStore]);
   const previewCanvasSize = useMemo(() => getScreenshotTemplateCanvasSize(store), [store]);
   const paletteFields = useMemo(() => getScreenshotTemplatePaletteFields(store, slot), [slot, store]);
   const isLocked = isBusy;
@@ -1884,6 +1945,20 @@ export default function ScreenshotsDialog({
     }));
   }, [slot]);
 
+  const handleTitleTopPaddingChange = useCallback((value: number) => {
+    const nextValue = Number.isFinite(value) ? value : 0;
+    setTitleTopPaddingByStore((prev) => ({
+      ios: {
+        ...prev.ios,
+        [slot]: nextValue,
+      },
+      play_store: {
+        ...prev.play_store,
+        [slot]: nextValue,
+      },
+    }));
+  }, [slot]);
+
   const handleTitleCenterChange = useCallback((value: boolean) => {
     setTitleCenterByStore((prev) => ({
       ios: {
@@ -1996,6 +2071,19 @@ export default function ScreenshotsDialog({
       }, { ...titleLineGapByStore.play_store }),
     });
   }, [resolvedTitleLineGap, titleLineGapByStore.ios, titleLineGapByStore.play_store]);
+
+  const handleApplyTitleTopPaddingToAllSlots = useCallback(() => {
+    setTitleTopPaddingByStore({
+      ios: SCREENSHOT_TEMPLATE_SLOTS.reduce((acc, targetSlot) => {
+        acc[targetSlot] = resolvedTitleTopPadding;
+        return acc;
+      }, { ...titleTopPaddingByStore.ios }),
+      play_store: SCREENSHOT_TEMPLATE_SLOTS.reduce((acc, targetSlot) => {
+        acc[targetSlot] = resolvedTitleTopPadding;
+        return acc;
+      }, { ...titleTopPaddingByStore.play_store }),
+    });
+  }, [resolvedTitleTopPadding, titleTopPaddingByStore.ios, titleTopPaddingByStore.play_store]);
 
   const handleApplyTitleTypographyFieldToAllSlots = useCallback((key: keyof ScreenshotTitleTypography) => {
     setTitleTypographyByStore({
@@ -2163,6 +2251,16 @@ export default function ScreenshotsDialog({
       },
     }));
     setTitleLineGapByStore((prev) => ({
+      ios: {
+        ...prev.ios,
+        [slot]: 0,
+      },
+      play_store: {
+        ...prev.play_store,
+        [slot]: 0,
+      },
+    }));
+    setTitleTopPaddingByStore((prev) => ({
       ios: {
         ...prev.ios,
         [slot]: 0,
@@ -2404,6 +2502,7 @@ export default function ScreenshotsDialog({
       slotPrimaryColor
     );
     const slotTitleLineGap = titleLineGapByStore[store]?.[targetSlot] ?? 0;
+    const slotTitleTopPadding = titleTopPaddingByStore[store]?.[targetSlot] ?? 0;
     const slotTitleCenter = parseScreenshotTitleCenterInput(
       titleCenterByStore[store]?.[targetSlot],
       false
@@ -2439,6 +2538,7 @@ export default function ScreenshotsDialog({
         titleTypography: slotTitleTypography,
         titleExtraLineColors: slotTitleExtraLineColors,
         titleLineGap: slotTitleLineGap,
+        titleTopPadding: slotTitleTopPadding,
         titleCenter: slotTitleCenter,
         backgroundSettings: slotBackgroundSettings,
         palette: slotPalette,
@@ -2466,6 +2566,7 @@ export default function ScreenshotsDialog({
       titleTypography: slotTitleTypography,
       titleExtraLineColors: slotTitleExtraLineColors,
       titleLineGap: slotTitleLineGap,
+      titleTopPadding: slotTitleTopPadding,
       titleCenter: slotTitleCenter,
       backgroundSettings: slotBackgroundSettings,
       palette: slotPalette,
@@ -2474,7 +2575,7 @@ export default function ScreenshotsDialog({
       screenshotSource: screenshotDataUrl || undefined,
     });
     return canvas;
-  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolveTitleTemplateContext, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTranslationsState, titleTypographyByStore]);
+  }, [activeLocaleKey, activeLocaleTitleMap, backgroundSettingsByStore, browserImageLoader, previewCanvasSize.height, previewCanvasSize.width, resolveTitleTemplateContext, resolvedHeroCameraMode, resolvedHeroCameraSettings, resolvedHeroKeyLightPosition, resolvedHeroKeyLightSettings, resolvedHeroPhoneLocation, resolvedHeroPhonePose, resolvedHeroPhoneShape, slotPalettesByStore, slotSbeSettingsByStore, store, titleCenterByStore, titleExtraLineColorsByStore, titleLineGapByStore, titleTopPaddingByStore, titleTranslationsState, titleTypographyByStore]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setPanelState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -2663,6 +2764,7 @@ export default function ScreenshotsDialog({
                   titleTypography={titleTypographyByStore[store][previewSlot]}
                   titleExtraLineColors={titleExtraLineColorsByStore[store][previewSlot] ?? []}
                   titleLineGap={titleLineGapByStore[store]?.[previewSlot] ?? 0}
+                  titleTopPadding={titleTopPaddingByStore[store]?.[previewSlot] ?? 0}
                   titleCenter={parseScreenshotTitleCenterInput(titleCenterByStore[store]?.[previewSlot], false)}
                   backgroundSettings={resolveScreenshotBackgroundSettings(
                     backgroundSettingsByStore[store]?.[previewSlot]
@@ -2965,6 +3067,24 @@ export default function ScreenshotsDialog({
                   inputMode="numeric"
                   value={resolvedTitleTypography.fontWeight}
                   onChange={(event) => handleTitleTypographyChange('fontWeight', event.target.value)}
+                  disabled={isLocked}
+                />
+              </div>
+
+              <div className="screenshot-title-field">
+                <div className="screenshots-field-head">
+                  <strong>Top Padding</strong>
+                  <ApplyAllButton
+                    label="Apply title top padding for all slots"
+                    disabled={isLocked}
+                    onApply={handleApplyTitleTopPaddingToAllSlots}
+                  />
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={resolvedTitleTopPadding}
+                  onChange={(event) => handleTitleTopPaddingChange(Number(event.target.value))}
                   disabled={isLocked}
                 />
               </div>
@@ -3565,6 +3685,7 @@ export default function ScreenshotsDialog({
                           slotPrimaryColor
                         ),
                         titleLineGap: titleLineGapByStore[store]?.[targetSlot] ?? 0,
+                        titleTopPadding: titleTopPaddingByStore[store]?.[targetSlot] ?? 0,
                         titleCenter: parseScreenshotTitleCenterInput(
                           titleCenterByStore[store]?.[targetSlot],
                           false
@@ -3588,6 +3709,7 @@ export default function ScreenshotsDialog({
                         slotTitles: localeSlotTitles,
                         slotTitleExtraLineColors: persistedTitleExtraLineColorsForStore,
                         slotTitleLineGaps: titleLineGapByStore[store],
+                        slotTitleTopPaddings: titleTopPaddingByStore[store],
                         slotTitleCenters: titleCenterByStore[store],
                         titleTypography: resolvedTitleTypography,
                         slotTitleTypography: titleTypographyByStore[store],
