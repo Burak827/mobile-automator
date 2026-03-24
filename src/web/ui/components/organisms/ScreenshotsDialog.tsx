@@ -660,30 +660,36 @@ function mergeScreenshotPresetConfig(
 
 function getSlotPaletteTargetsForKey(
   slot: ScreenshotTemplateSlot,
-  key: keyof ScreenshotTemplatePalette
+  key: keyof ScreenshotTemplatePalette,
+  store: ScreenshotStore,
+  iosDeviceFamily?: IosScreenshotDeviceFamily
 ): ScreenshotTemplateSlot[] {
+  const activeSlots = getActiveScreenshotTemplateSlots(store, iosDeviceFamily);
   if (key === 'phoneColor') {
-    return [...SCREENSHOT_TEMPLATE_SLOTS];
+    return activeSlots;
   }
   if (slot === 1 || slot === 2) {
     if (key === 'accent') {
-      return [1, 2];
+      return [1, 2].filter((s) => activeSlots.includes(s as ScreenshotTemplateSlot)) as ScreenshotTemplateSlot[];
     }
     return [slot];
   }
   return [slot];
 }
 
-function getSlotScreenshotTargets(slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
+function getSlotScreenshotTargets(slot: ScreenshotTemplateSlot, store: ScreenshotStore, iosDeviceFamily?: IosScreenshotDeviceFamily): ScreenshotTemplateSlot[] {
+  const activeSlots = getActiveScreenshotTemplateSlots(store, iosDeviceFamily);
   if (slot === 1 || slot === 2) {
-    return [1, 2];
+    // For hero slots, apply to both 1 and 2, but only if they're both active
+    return [1, 2].filter((s) => activeSlots.includes(s as ScreenshotTemplateSlot)) as ScreenshotTemplateSlot[];
   }
   return [slot];
 }
 
-function getSlotBackgroundSettingsTargets(slot: ScreenshotTemplateSlot): ScreenshotTemplateSlot[] {
+function getSlotBackgroundSettingsTargets(slot: ScreenshotTemplateSlot, store: ScreenshotStore, iosDeviceFamily?: IosScreenshotDeviceFamily): ScreenshotTemplateSlot[] {
+  const activeSlots = getActiveScreenshotTemplateSlots(store, iosDeviceFamily);
   if (slot === 1 || slot === 2) {
-    return [1, 2];
+    return [1, 2].filter((s) => activeSlots.includes(s as ScreenshotTemplateSlot)) as ScreenshotTemplateSlot[];
   }
   return [slot];
 }
@@ -1893,7 +1899,7 @@ export default function ScreenshotsDialog({
   const handleSlotFileChange = useCallback((nextFile: File | null) => {
     if (!nextFile) return;
 
-    const targetSlots = getSlotScreenshotTargets(slot);
+    const targetSlots = getSlotScreenshotTargets(slot, store, store === 'ios' ? iosDeviceFamily : undefined);
     const requestKey = `${store}:${targetSlots.join('-')}`;
     const requestId = (fileReadRequestIdsRef.current[requestKey] ?? 0) + 1;
     fileReadRequestIdsRef.current[requestKey] = requestId;
@@ -1943,7 +1949,7 @@ export default function ScreenshotsDialog({
           },
         }));
       });
-  }, [slot, store]);
+  }, [slot, store, iosDeviceFamily]);
 
   const handleZipFileChange = useCallback((nextFile: File | null) => {
     if (!nextFile) return;
@@ -1997,15 +2003,18 @@ export default function ScreenshotsDialog({
 
   const loadZipLocaleScreenshotDataUrls = useCallback(async (
     targetStore: ScreenshotStore,
-    targetLocale: string
+    targetLocale: string,
+    targetIosDeviceFamily?: IosScreenshotDeviceFamily
   ): Promise<Partial<Record<ScreenshotTemplateSlot, string>>> => {
     const archive = zipArchivesRef.current[targetStore];
     const localeKey = findZipLocaleKey(zipManifestByStore[targetStore], targetLocale);
     if (!archive || !localeKey) return {};
     const localeEntries = zipManifestByStore[targetStore][localeKey];
     const dataUrlByPath = new Map<string, string>();
+    // Only load screenshots for slots that are active for this device family
+    const slotsToLoad = getActiveScreenshotTemplateSlots(targetStore, targetIosDeviceFamily);
     const pairs = await Promise.all(
-      SCREENSHOT_TEMPLATE_SLOTS.map(async (targetSlot) => {
+      slotsToLoad.map(async (targetSlot) => {
         const entry = getZipEntryForSlot(localeEntries, targetSlot);
         if (!entry) return null;
         if (!dataUrlByPath.has(entry.path)) {
@@ -2028,8 +2037,8 @@ export default function ScreenshotsDialog({
           ios: { ...prev.ios },
           play_store: { ...prev.play_store },
         };
-        const targets = getSlotPaletteTargetsForKey(slot, key);
         for (const { id: targetStore } of SCREENSHOT_STORES) {
+          const targets = getSlotPaletteTargetsForKey(slot, key, targetStore, targetStore === 'ios' ? iosDeviceFamily : undefined);
           for (const targetSlot of targets) {
             const basePalette = resolveScreenshotTemplatePalette(targetStore, nextPalettes[targetStore][targetSlot]);
             nextPalettes[targetStore][targetSlot] = resolveScreenshotTemplatePalette(targetStore, {
@@ -2041,7 +2050,7 @@ export default function ScreenshotsDialog({
         return nextPalettes;
       });
     },
-    [slot, store]
+    [slot, store, iosDeviceFamily]
   );
 
   const handleTitleChange = useCallback((value: string) => {
@@ -2170,8 +2179,8 @@ export default function ScreenshotsDialog({
           ios: { ...prev.ios },
           play_store: { ...prev.play_store },
         } satisfies Record<ScreenshotStore, ScreenshotSlotBackgroundSettingsStateMap>;
-        const targetSlots = getSlotBackgroundSettingsTargets(slot);
         for (const { id: targetStore } of SCREENSHOT_STORES) {
+          const targetSlots = getSlotBackgroundSettingsTargets(slot, targetStore, targetStore === 'ios' ? iosDeviceFamily : undefined);
           for (const targetSlot of targetSlots) {
             next[targetStore][targetSlot] = resolveScreenshotBackgroundSettings({
               ...next[targetStore][targetSlot],
@@ -2182,7 +2191,7 @@ export default function ScreenshotsDialog({
         return next;
       });
     },
-    [slot]
+    [slot, iosDeviceFamily]
   );
 
   const handleApplyTitleValueToAllSlots = useCallback(() => {
@@ -2354,6 +2363,8 @@ export default function ScreenshotsDialog({
   }, [appId, buildPresetStateForStore, onPresetChange, onTitleTranslationsChange, store, titleTranslationsState]);
 
   const handleResetSelectedSlot = useCallback(() => {
+    const effectiveFamily = store === 'ios' ? iosDeviceFamily : undefined;
+
     setTitleTranslationsState((prev) => ({
       ...prev,
       [activeLocaleKey]: {
@@ -2362,98 +2373,70 @@ export default function ScreenshotsDialog({
       },
     }));
     setTitlesByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: '',
-      },
-      play_store: {
-        ...prev.play_store,
+      ...prev,
+      [store]: {
+        ...prev[store],
         [slot]: '',
       },
     }));
 
     setSlotPalettesByStore((prev) => {
-      const nextPalettes: Record<ScreenshotStore, ScreenshotSlotPaletteMap> = {
-        ios: { ...prev.ios },
-        play_store: { ...prev.play_store },
-      };
-      for (const { id: targetStore } of SCREENSHOT_STORES) {
-        const resetPalette = getScreenshotTemplateDefaultPalette(targetStore);
-        for (const field of getScreenshotTemplatePaletteFields(targetStore, slot)) {
-          for (const targetSlot of getSlotPaletteTargetsForKey(slot, field.key)) {
-            const basePalette = resolveScreenshotTemplatePalette(
-              targetStore,
-              nextPalettes[targetStore][targetSlot]
-            );
-            nextPalettes[targetStore][targetSlot] = resolveScreenshotTemplatePalette(targetStore, {
-              ...basePalette,
-              [field.key]: resetPalette[field.key],
-            });
-          }
+      const nextPalettes = { ...prev, [store]: { ...prev[store] } };
+      const resetPalette = getScreenshotTemplateDefaultPalette(store);
+      for (const field of getScreenshotTemplatePaletteFields(store, slot)) {
+        for (const targetSlot of getSlotPaletteTargetsForKey(slot, field.key, store, effectiveFamily)) {
+          const basePalette = resolveScreenshotTemplatePalette(
+            store,
+            nextPalettes[store][targetSlot]
+          );
+          nextPalettes[store][targetSlot] = resolveScreenshotTemplatePalette(store, {
+            ...basePalette,
+            [field.key]: resetPalette[field.key],
+          });
         }
       }
       return nextPalettes;
     });
 
     setTitleTypographyByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: resolveScreenshotTitleTypography('ios', slot, undefined),
-      },
-      play_store: {
-        ...prev.play_store,
-        [slot]: resolveScreenshotTitleTypography('play_store', slot, undefined),
+      ...prev,
+      [store]: {
+        ...prev[store],
+        [slot]: resolveScreenshotTitleTypography(store, slot, undefined),
       },
     }));
     setTitleLineGapByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: 0,
-      },
-      play_store: {
-        ...prev.play_store,
+      ...prev,
+      [store]: {
+        ...prev[store],
         [slot]: 0,
       },
     }));
     setTitleTopPaddingByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: getDefaultTitleTopPadding(iosDeviceFamily),
-      },
-      play_store: {
-        ...prev.play_store,
-        [slot]: 0,
+      ...prev,
+      [store]: {
+        ...prev[store],
+        [slot]: getDefaultTitleTopPadding(effectiveFamily),
       },
     }));
     setTitleCenterByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: false,
-      },
-      play_store: {
-        ...prev.play_store,
+      ...prev,
+      [store]: {
+        ...prev[store],
         [slot]: false,
       },
     }));
     setTitleExtraLineColorsByStore((prev) => ({
-      ios: {
-        ...prev.ios,
-        [slot]: [],
-      },
-      play_store: {
-        ...prev.play_store,
+      ...prev,
+      [store]: {
+        ...prev[store],
         [slot]: [],
       },
     }));
     setBackgroundSettingsByStore((prev) => {
-      const next = {
-        ios: { ...prev.ios },
-        play_store: { ...prev.play_store },
-      } satisfies Record<ScreenshotStore, ScreenshotSlotBackgroundSettingsStateMap>;
-      for (const { id: targetStore } of SCREENSHOT_STORES) {
-        for (const targetSlot of getSlotBackgroundSettingsTargets(slot)) {
-          next[targetStore][targetSlot] = resolveScreenshotBackgroundSettings();
-        }
+      const next = { ...prev, [store]: { ...prev[store] } };
+      for (const targetSlot of getSlotBackgroundSettingsTargets(slot, store, effectiveFamily)) {
+        next[store][targetSlot] = resolveScreenshotBackgroundSettings();
       }
       return next;
     });
@@ -2466,7 +2449,7 @@ export default function ScreenshotsDialog({
     }));
     setHeroPhoneShapeByStore((prev) => ({
       ...prev,
-      [store]: resolveProceduralDeviceShapeForStore(store, getDefaultProceduralDeviceShape(store, iosDeviceFamily), iosDeviceFamily),
+      [store]: resolveProceduralDeviceShapeForStore(store, getDefaultProceduralDeviceShape(store, effectiveFamily), effectiveFamily),
     }));
     setHeroPhoneLocationByStore((prev) => ({
       ...prev,
@@ -2482,12 +2465,9 @@ export default function ScreenshotsDialog({
     }));
     if (slot === 1 || slot === 2) {
       setSlotSbeSettingsByStore((prev) => ({
-        ios: {
-          ...prev.ios,
-          [slot]: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(slot)),
-        },
-        play_store: {
-          ...prev.play_store,
+        ...prev,
+        [store]: {
+          ...prev[store],
           [slot]: resolveSlot1SbeSettings(getDefaultSlotSbeSettings(slot)),
         },
       }));
@@ -2498,8 +2478,14 @@ export default function ScreenshotsDialog({
     }));
     setHeroCameraSettingsByStore((prev) => ({
       ...prev,
-      [store]: resolveProceduralCameraSettings(getDefaultProceduralCameraSettings(iosDeviceFamily)),
+      [store]: resolveProceduralCameraSettings(getDefaultProceduralCameraSettings(effectiveFamily)),
     }));
+
+    // Clear the device family cache for the current family so switching
+    // back doesn't restore stale pre-reset values.
+    if (store === 'ios') {
+      delete iosDeviceFamilyCacheRef.current[iosDeviceFamily];
+    }
   }, [activeLocaleKey, iosDeviceFamily, slot, store]);
 
   const handleGenerateCurrentTitleTranslations = useCallback(async () => {
@@ -2749,7 +2735,8 @@ export default function ScreenshotsDialog({
     if (!isOpen) return;
 
     const activeTypographyMap = titleTypographyByStore[store];
-    const requests = SCREENSHOT_TEMPLATE_SLOTS.map((entry) => ({
+    // Only load fonts for slots that are currently active for this device family
+    const requests = activeScreenshotSlots.map((entry) => ({
       family: activeTypographyMap[entry].fontFamily,
       weights: [activeTypographyMap[entry].fontWeight],
     }));
@@ -2763,7 +2750,7 @@ export default function ScreenshotsDialog({
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, store, titleTypographyByStore]);
+  }, [isOpen, store, titleTypographyByStore, activeScreenshotSlots]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2786,7 +2773,7 @@ export default function ScreenshotsDialog({
     zipPreviewRequestIdsRef.current[requestKey] = requestId;
 
     void (async () => {
-      const dataUrls = await loadZipLocaleScreenshotDataUrls(store, localeKey);
+      const dataUrls = await loadZipLocaleScreenshotDataUrls(store, localeKey, store === 'ios' ? iosDeviceFamily : undefined);
       if (zipPreviewRequestIdsRef.current[requestKey] !== requestId) return;
       setZipPreviewUrlsByStore((prev) => ({
         ...prev,
@@ -2813,7 +2800,7 @@ export default function ScreenshotsDialog({
         },
       }));
     });
-  }, [isOpen, loadZipLocaleScreenshotDataUrls, locale, slot, store, zipManifestByStore]);
+  }, [isOpen, loadZipLocaleScreenshotDataUrls, locale, slot, store, zipManifestByStore, iosDeviceFamily]);
 
   useEffect(() => {
     if (activeScreenshotSlots.includes(slot)) return;
@@ -3833,7 +3820,7 @@ export default function ScreenshotsDialog({
                     );
                     const localeZipDataUrls =
                       zipLocaleKeys.length > 0
-                        ? await loadZipLocaleScreenshotDataUrls(store, targetLocale)
+                        ? await loadZipLocaleScreenshotDataUrls(store, targetLocale, store === 'ios' ? iosDeviceFamily : undefined)
                         : {};
                     const renderedSlots: ScreenshotRenderedSlotPayload[] = [];
 
