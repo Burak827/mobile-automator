@@ -650,7 +650,7 @@ export class StoreApiService {
       client,
       path: `/v1/apps/${ascAppId}/inAppPurchasesV2`,
       query: {
-        "fields[inAppPurchasesV2]": ["productId"],
+        "fields[inAppPurchases]": ["productId"],
         "fields[inAppPurchaseLocalizations]": ["locale", "name", "description", "state"],
         include: ["inAppPurchaseLocalizations"],
         limit: 200,
@@ -2475,7 +2475,7 @@ export class StoreApiService {
     }
 
     const storeLocale = toStoreLocale(canonicalLocale, "app_store");
-    const createBodyV2 = {
+    const createBody = {
       data: {
         type: "inAppPurchaseLocalizations",
         attributes: {
@@ -2484,21 +2484,6 @@ export class StoreApiService {
         },
         relationships: {
           inAppPurchaseV2: {
-            data: { id: entry.iapId, type: "inAppPurchasesV2" },
-          },
-        },
-      },
-    };
-
-    const createBodyLegacy = {
-      data: {
-        type: "inAppPurchaseLocalizations",
-        attributes: {
-          locale: storeLocale,
-          ...fields,
-        },
-        relationships: {
-          inAppPurchase: {
             data: { id: entry.iapId, type: "inAppPurchases" },
           },
         },
@@ -2509,10 +2494,12 @@ export class StoreApiService {
     try {
       response = await client.post<{ data?: { id?: string } }>(
         "/v1/inAppPurchaseLocalizations",
-        createBodyV2
+        createBody
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+
+      // Handle "already exists" — refresh lookup and patch instead
       if (/already exists|already.*localization|already.*used/i.test(message)) {
         const freshLookup = await this.getAscIapLookup(client, ascAppId, { forceRefresh: true });
         const freshEntry = freshLookup.get(productId);
@@ -2529,14 +2516,7 @@ export class StoreApiService {
         }
       }
 
-      try {
-        response = await client.post<{ data?: { id?: string } }>(
-          "/v1/inAppPurchaseLocalizations",
-          createBodyLegacy
-        );
-      } catch {
-        throw error;
-      }
+      throw error;
     }
 
     const createdId = response?.data?.id?.trim();

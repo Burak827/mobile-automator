@@ -3,11 +3,17 @@ import { useDialogController } from "../../hooks/useDialogController.js";
 import Button from "../atoms/Button.js";
 import SourceLocaleSelect from "../atoms/SourceLocaleSelect.js";
 import type {
+  AIProvider,
   AppStoreIapDetail,
   PlayStoreIapDetail,
   StoreIapEntry,
   StoreId,
 } from "../../types.js";
+
+const PROVIDER_LABEL: Record<AIProvider, string> = {
+  openai: "ChatGPT",
+  anthropic: "Claude Opus",
+};
 
 type Props = {
   isOpen: boolean;
@@ -17,10 +23,12 @@ type Props = {
   sourceLocale: string;
   canShowIos: boolean;
   canShowPlay: boolean;
+  availableProviders: AIProvider[];
+  defaultProvider: AIProvider;
   appStoreIaps: StoreIapEntry[];
   playStoreIaps: StoreIapEntry[];
   onSelectStore: (store: StoreId) => void;
-  onGenerate: (store: StoreId) => void;
+  onGenerate: (store: StoreId, provider: AIProvider) => void;
   onClose: () => void;
 };
 
@@ -60,6 +68,8 @@ export default function IapDialog({
   sourceLocale,
   canShowIos,
   canShowPlay,
+  availableProviders,
+  defaultProvider,
   appStoreIaps,
   playStoreIaps,
   onSelectStore,
@@ -67,6 +77,7 @@ export default function IapDialog({
   onClose,
 }: Props) {
   const dialogRef = useDialogController(isOpen, onClose);
+  const [provider, setProvider] = useState<AIProvider>(defaultProvider);
   const [selectedProductByStore, setSelectedProductByStore] = useState<Record<StoreId, string>>({
     app_store: "",
     play_store: "",
@@ -187,10 +198,25 @@ export default function IapDialog({
         <div className="generate-header">
           <h2>In-App Purchases</h2>
           <div className="modal-actions">
+            {availableProviders.length > 0 ? (
+              <div className="generate-provider-switch">
+                {availableProviders.map((item) => (
+                  <Button
+                    key={item}
+                    type="button"
+                    variant={provider === item ? "primary" : "ghost"}
+                    onClick={() => setProvider(item)}
+                    disabled={isGenerating}
+                  >
+                    {PROVIDER_LABEL[item]}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
             <Button
               type="button"
               variant="primary"
-              onClick={() => onGenerate(selectedStore)}
+              onClick={() => onGenerate(selectedStore, provider)}
               disabled={isLoading || isGenerating || items.length === 0}
               title={`Source locale: ${sourceLocale || "n/a"}`}
             >

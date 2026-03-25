@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type {
+  AIProvider,
   IapListPayload,
   PendingStoreChangeMap,
   PendingStoreIapFieldChange,
@@ -62,7 +63,7 @@ export function useIapActions(params: {
     }
   }, [pushStatus, setAppStoreIaps, setIsIapLoading, setPlayStoreIaps]);
 
-  const handleGenerateIapTranslations = useCallback(async (store: StoreId) => {
+  const handleGenerateIapTranslations = useCallback(async (store: StoreId, provider?: AIProvider) => {
     if (!selectedAppId) return;
 
     const storeName = store === 'app_store' ? 'App Store' : 'Play Store';
@@ -71,7 +72,7 @@ export function useIapActions(params: {
     pushStatus(`✨ ${storeName} IAP çevirileri oluşturuluyor (source: ${sourceLocale})...`);
 
     try {
-      const response = await requestIapTranslationStream(selectedAppId, store);
+      const response = await requestIapTranslationStream(selectedAppId, store, provider);
 
       if (!response.ok) {
         const errBody = await response.text();

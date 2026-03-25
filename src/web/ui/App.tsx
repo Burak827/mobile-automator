@@ -2545,11 +2545,13 @@ export default function App() {
         sourceLocale={selectedApp?.sourceLocale || appConfig.sourceLocale || 'en-US'}
         canShowIos={showIosPanel}
         canShowPlay={showPlayPanel}
+        availableProviders={availableAiProviders}
+        defaultProvider={defaultAiProvider}
         appStoreIaps={appStoreIaps}
         playStoreIaps={playStoreIaps}
         onSelectStore={setIapModalStore}
-        onGenerate={(store) => {
-          void handleGenerateIapTranslations(store);
+        onGenerate={(store, provider) => {
+          void handleGenerateIapTranslations(store, provider);
         }}
         onClose={() => setIsIapOpen(false)}
       />
