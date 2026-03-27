@@ -1630,6 +1630,21 @@ export default function ScreenshotsDialog({
     () => findZipLocaleKey(zipManifestByStore[store], locale),
     [locale, store, zipManifestByStore]
   );
+  const localeSelectOptions = useMemo(() => {
+    const currentLocale = locale.trim() || defaultLocale.trim() || 'en-US';
+    if (zipLocaleKeys.length === 0) {
+      return [currentLocale];
+    }
+    if (findZipLocaleKey(zipManifestByStore[store], currentLocale)) {
+      return zipLocaleKeys;
+    }
+    return [
+      currentLocale,
+      ...zipLocaleKeys.filter(
+        (entry) => normalizeLocaleToken(entry) !== normalizeLocaleToken(currentLocale)
+      ),
+    ];
+  }, [defaultLocale, locale, store, zipLocaleKeys, zipManifestByStore]);
   const activeZipLocaleEntries = activeZipLocaleKey ? zipManifestByStore[store][activeZipLocaleKey] : undefined;
   const activeLocaleKey = useMemo(
     () => locale.trim() || defaultLocale.trim() || 'en-US',
@@ -1973,9 +1988,6 @@ export default function ScreenshotsDialog({
         ...prev,
         [store]: createEmptySlotPreviewErrorMap(),
       }));
-      if (!findZipLocaleKey(manifest, locale)) {
-        setLocale(locales[0] ?? 'en-US');
-      }
     })().catch((error) => {
       zipArchivesRef.current[store] = null;
       setZipFilesByStore((prev) => ({
@@ -3009,17 +3021,17 @@ export default function ScreenshotsDialog({
                   onChange={(event) => setLocale(event.target.value)}
                   disabled={isLocked}
                 >
-                  {zipLocaleKeys.length > 0 ? (
-                    zipLocaleKeys.map((item) => (
+                  {localeSelectOptions.map((item) => {
+                    const isMissingCurrentLocale =
+                      zipLocaleKeys.length > 0 &&
+                      !activeZipLocaleKey &&
+                      normalizeLocaleToken(item) === normalizeLocaleToken(locale);
+                    return (
                       <option key={item} value={item}>
-                        {item}
+                        {isMissingCurrentLocale ? `${item} (ZIP'te yok)` : item}
                       </option>
-                    ))
-                  ) : (
-                    <option value={locale.trim() || defaultLocale.trim() || 'en-US'}>
-                      {locale.trim() || defaultLocale.trim() || 'en-US'}
-                    </option>
-                  )}
+                    );
+                  })}
                 </select>
               </label>
 
